@@ -12,42 +12,28 @@ namespace HandBrakeWPF.Services.Encode.Model
     using System.Collections.Generic;
     using System.Collections.ObjectModel;
 
-    using Caliburn.Micro;
-
     using HandBrake.Interop.Interop.Model;
     using HandBrake.Interop.Interop.Model.Encoding;
 
     using HandBrakeWPF.Model.Filters;
     using HandBrakeWPF.Services.Encode.Model.Models;
 
-    using AllowedPassthru = HandBrakeWPF.Services.Encode.Model.Models.AllowedPassthru;
-    using AudioTrack = HandBrakeWPF.Services.Encode.Model.Models.AudioTrack;
-    using ChapterMarker = HandBrakeWPF.Services.Encode.Model.Models.ChapterMarker;
-    using DenoisePreset = HandBrakeWPF.Services.Encode.Model.Models.DenoisePreset;
-    using DenoiseTune = HandBrakeWPF.Services.Encode.Model.Models.DenoiseTune;
-    using FramerateMode = HandBrakeWPF.Services.Encode.Model.Models.FramerateMode;
-    using OutputFormat = HandBrakeWPF.Services.Encode.Model.Models.OutputFormat;
-    using PointToPointMode = HandBrakeWPF.Services.Encode.Model.Models.PointToPointMode;
-    using SubtitleTrack = HandBrakeWPF.Services.Encode.Model.Models.SubtitleTrack;
-    using VideoLevel = HandBrakeWPF.Services.Encode.Model.Models.Video.VideoLevel;
-    using VideoPreset = HandBrakeWPF.Services.Encode.Model.Models.Video.VideoPreset;
-    using VideoProfile = HandBrakeWPF.Services.Encode.Model.Models.Video.VideoProfile;
-    using VideoTune = HandBrakeWPF.Services.Encode.Model.Models.Video.VideoTune;
+    using AllowedPassthru = Models.AllowedPassthru;
+    using AudioTrack = Models.AudioTrack;
+    using ChapterMarker = Models.ChapterMarker;
+    using DenoisePreset = Models.DenoisePreset;
+    using DenoiseTune = Models.DenoiseTune;
+    using FramerateMode = Models.FramerateMode;
+    using OutputFormat = Models.OutputFormat;
+    using PointToPointMode = Models.PointToPointMode;
+    using SubtitleTrack = Models.SubtitleTrack;
+    using VideoLevel = Models.Video.VideoLevel;
+    using VideoPreset = Models.Video.VideoPreset;
+    using VideoProfile = Models.Video.VideoProfile;
+    using VideoTune = Models.Video.VideoTune;
 
-    public class EncodeTask : PropertyChangedBase
+    public class EncodeTask 
     {
-        #region Private Fields
-
-        /// <summary>
-        /// The advanced panel enabled.
-        /// </summary>
-        private bool showAdvancedTab;
-
-        #endregion
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="EncodeTask"/> class.
-        /// </summary>
         public EncodeTask()
         {
             this.Cropping = new Cropping();
@@ -57,20 +43,13 @@ namespace HandBrakeWPF.Services.Encode.Model
             this.AllowedPassthruOptions = new AllowedPassthru();
             this.Modulus = 16;
             this.MetaData = new MetaData();
+            this.Padding = new PaddingFilter();
 
             this.VideoTunes = new List<VideoTune>();
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="EncodeTask"/> class. 
-        /// Copy Constructor
-        /// </summary>
-        /// <param name="task">
-        /// The task.
-        /// </param>
         public EncodeTask(EncodeTask task)
         {
-            this.AdvancedEncoderOptions = task.AdvancedEncoderOptions;
             this.AllowedPassthruOptions = new AllowedPassthru(task.AllowedPassthruOptions);
             this.Anamorphic = task.Anamorphic;
             this.Angle = task.Angle;
@@ -95,7 +74,9 @@ namespace HandBrakeWPF.Services.Encode.Model
             this.CustomDetelecine = task.CustomDetelecine;
             this.CustomCombDetect = task.CustomCombDetect;
             this.CombDetect = task.CombDetect;
-            this.Deblock = task.Deblock;
+            this.DeblockPreset = task.DeblockPreset;
+            this.DeblockTune = task.DeblockTune;
+            this.CustomDeblock = task.CustomDeblock;
             this.DeinterlacePreset = task.DeinterlacePreset;
             this.DeinterlaceFilter = task.DeinterlaceFilter;
             this.Denoise = task.Denoise;
@@ -109,6 +90,7 @@ namespace HandBrakeWPF.Services.Encode.Model
             this.SharpenPreset = task.SharpenPreset;
             this.SharpenTune = task.SharpenTune;
             this.SharpenCustom = task.SharpenCustom;
+            this.Padding = task.Padding;
 
             this.DisplayWidth = task.DisplayWidth;
             this.EndPoint = task.EndPoint;
@@ -153,386 +135,167 @@ namespace HandBrakeWPF.Services.Encode.Model
             this.ExtraAdvancedArguments = task.ExtraAdvancedArguments;
 
             this.MetaData = new MetaData(task.MetaData);
-
-            this.ShowAdvancedTab = task.ShowAdvancedTab;
         }
 
-        #region Source
+        /* Source */
 
-        /// <summary>
-        /// Gets or sets Source.
-        /// </summary>
         public string Source { get; set; }
 
-        /// <summary>
-        /// Gets or sets Title.
-        /// </summary>
         public int Title { get; set; }
 
-        /// <summary>
-        /// Gets or sets the Angle
-        /// </summary>
         public int Angle { get; set; }
 
-        /// <summary>
-        /// Gets or sets PointToPointMode.
-        /// </summary>
         public PointToPointMode PointToPointMode { get; set; }
 
-        /// <summary>
-        /// Gets or sets StartPoint.
-        /// </summary>
         public long StartPoint { get; set; }
 
-        /// <summary>
-        /// Gets or sets EndPoint.
-        /// </summary>
         public long EndPoint { get; set; }
 
-        #endregion
+        /* Destination */
 
-        #region Destination
-
-        /// <summary>
-        /// Gets or sets Destination.
-        /// </summary>
         public string Destination { get; set; }
 
-        #endregion
+        /* Output Settings */
 
-        #region Output Settings
-
-        /// <summary>
-        /// Gets or sets OutputFormat.
-        /// </summary>
         public OutputFormat OutputFormat { get; set; }
 
-        /// <summary>
-        /// Gets or sets a value indicating whether Optimize.
-        /// </summary>
         public bool OptimizeMP4 { get; set; }
 
-        /// <summary>
-        /// Gets or sets a value indicating whether IPod5GSupport.
-        /// </summary>
         public bool IPod5GSupport { get; set; }
 
         public bool AlignAVStart { get; set; }
+        
+        /* Picture Settings */
 
-        #endregion
-
-        #region Picture
-
-        /// <summary>
-        /// Gets or sets Width.
-        /// </summary>
         public int? Width { get; set; }
 
-        /// <summary>
-        /// Gets or sets Height.
-        /// </summary>
         public int? Height { get; set; }
 
-        /// <summary>
-        /// Gets or sets MaxWidth.
-        /// </summary>
         public int? MaxWidth { get; set; }
 
-        /// <summary>
-        /// Gets or sets MaxHeight.
-        /// </summary>
         public int? MaxHeight { get; set; }
 
-        /// <summary>
-        /// Gets or sets Cropping.
-        /// </summary>
         public Cropping Cropping { get; set; }
 
-        /// <summary>
-        /// Gets or sets a value indicating whether HasCropping.
-        /// </summary>
         public bool HasCropping { get; set; }
 
-        /// <summary>
-        /// Gets or sets Anamorphic.
-        /// </summary>
         public Anamorphic Anamorphic { get; set; }
 
-        /// <summary>
-        /// Gets or sets DisplayWidth.
-        /// </summary>
         public double? DisplayWidth { get; set; }
 
-        /// <summary>
-        /// Gets or sets a value indicating whether KeepDisplayAspect.
-        /// </summary>
         public bool KeepDisplayAspect { get; set; }
 
-        /// <summary>
-        /// Gets or sets PixelAspectX.
-        /// </summary>
         public int PixelAspectX { get; set; }
 
-        /// <summary>
-        /// Gets or sets PixelAspectY.
-        /// </summary>
         public int PixelAspectY { get; set; }
 
-        /// <summary>
-        /// Gets or sets Modulus.
-        /// </summary>
         public int? Modulus { get; set; }
 
-        #endregion
 
-        #region Filters
+        /* Filters */
 
-        /// <summary>
-        /// Gets or sets Deinterlace Filter Mode
-        /// </summary>
         public DeinterlaceFilter DeinterlaceFilter { get; set; }
 
-        /// <summary>
-        /// Gets or sets Deinterlace.
-        /// </summary>
         public HBPresetTune DeinterlacePreset { get; set; }
 
-        /// <summary>
-        /// Gets or sets the comb detect.
-        /// </summary>
         public CombDetect CombDetect { get; set; }
 
-        /// <summary>
-        /// Gets or sets CustomDecomb.
-        /// </summary>
         public string CustomDeinterlaceSettings { get; set; }
 
-        /// <summary>
-        /// Gets or sets the custom comb detect.
-        /// </summary>
         public string CustomCombDetect { get; set; }
 
-        /// <summary>
-        /// Gets or sets Detelecine.
-        /// </summary>
         public Detelecine Detelecine { get; set; }
 
-        /// <summary>
-        /// Gets or sets CustomDetelecine.
-        /// </summary>
         public string CustomDetelecine { get; set; }
 
-        /// <summary>
-        /// Gets or sets Denoise.
-        /// </summary>
         public Denoise Denoise { get; set; }
 
-        /// <summary>
-        /// Gets or sets the denoise preset.
-        /// </summary>
         public DenoisePreset DenoisePreset { get; set; }
 
-        /// <summary>
-        /// Gets or sets the denoise tune.
-        /// </summary>
         public DenoiseTune DenoiseTune { get; set; }
 
-        /// <summary>
-        /// Gets or sets CustomDenoise.
-        /// </summary>
         public string CustomDenoise { get; set; }
 
-        /// <summary>
-        /// Gets or sets Deblock.
-        /// </summary>
-        public int Deblock { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether Grayscale.
-        /// </summary>
         public bool Grayscale { get; set; }
 
-        /// <summary>
-        /// Rotate the Video by x Degrees
-        /// </summary>
         public int Rotation { get; set; }
 
-        /// <summary>
-        /// Flip the video.
-        /// </summary>
         public bool FlipVideo { get; set; }
 
         public Sharpen Sharpen { get; set; }
+
         public FilterPreset SharpenPreset { get; set; }
+
         public FilterTune SharpenTune { get; set; }
+
         public string SharpenCustom { get; set; }
-        #endregion
 
-        #region Video
+        public FilterPreset DeblockPreset { get; set; }
 
-        /// <summary>
-        /// Gets or sets VideoEncodeRateType.
-        /// </summary>
+        public FilterTune DeblockTune { get; set; }
+
+        public string CustomDeblock { get; set; }
+
+        public PaddingFilter Padding { get; set; }
+ 
+        /* Video */
+
         public VideoEncodeRateType VideoEncodeRateType { get; set; }
 
-        /// <summary>
-        /// Gets or sets the VideoEncoder
-        /// </summary>
         public VideoEncoder VideoEncoder { get; set; }
 
-        /// <summary>
-        /// Gets or sets the Video Encode Mode
-        /// </summary>
-        public FramerateMode FramerateMode { get; set; }
-
-        /// <summary>
-        /// Gets or sets Quality.
-        /// </summary>
-        public double? Quality { get; set; }
-
-        /// <summary>
-        /// Gets or sets VideoBitrate.
-        /// </summary>
-        public int? VideoBitrate { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether TwoPass.
-        /// </summary>
-        public bool TwoPass { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether TurboFirstPass.
-        /// </summary>
-        public bool TurboFirstPass { get; set; }
-
-        /// <summary>
-        /// Gets or sets Framerate.
-        /// Null = Same as Source
-        /// </summary>
-        public double? Framerate { get; set; }
-
-        #endregion
-
-        #region Audio
-
-        /// <summary>
-        /// Gets or sets AudioEncodings.
-        /// </summary>
-        public ObservableCollection<AudioTrack> AudioTracks { get; set; }
-
-        /// <summary>
-        /// Gets or sets AllowedPassthruOptions.
-        /// </summary>
-        public AllowedPassthru AllowedPassthruOptions { get; set; }
-
-        #endregion
-
-        #region Subtitles
-
-        /// <summary>
-        /// Gets or sets SubtitleTracks.
-        /// </summary>
-        public ObservableCollection<SubtitleTrack> SubtitleTracks { get; set; }
-
-        #endregion
-
-        #region Chapters
-
-        /// <summary>
-        /// Gets or sets a value indicating whether IncludeChapterMarkers.
-        /// </summary>
-        public bool IncludeChapterMarkers { get; set; }
-
-        /// <summary>
-        /// Gets or sets ChapterMarkersFilePath.
-        /// </summary>
-        public string ChapterMarkersFilePath { get; set; }
-
-        /// <summary>
-        /// Gets or sets ChapterNames.
-        /// </summary>
-        public ObservableCollection<ChapterMarker> ChapterNames { get; set; }
-
-        #endregion
-
-        #region Advanced
-
-        /// <summary>
-        /// Gets or sets AdvancedEncoderOptions.
-        /// </summary>
-        public string AdvancedEncoderOptions { get; set; }
-
-        /// <summary>
-        /// Gets or sets the video profile.
-        /// </summary>
         public VideoProfile VideoProfile { get; set; }
 
-        /// <summary>
-        /// Gets or sets the video level.
-        /// </summary>
         public VideoLevel VideoLevel { get; set; }
 
-        /// <summary>
-        /// Gets or sets the video preset.
-        /// </summary>
         public VideoPreset VideoPreset { get; set; }
 
-        /// <summary>
-        /// Gets or sets the video tunes.
-        /// </summary>
         public List<VideoTune> VideoTunes { get; set; }
 
-        /// <summary>
-        /// Gets or sets Extra Advanced Arguments for the Video Tab.
-        /// </summary>
         public string ExtraAdvancedArguments { get; set; }
 
-        /// <summary>
-        /// Gets or sets a value indicating whether advanced panel enabled.
-        /// </summary>
-        public bool ShowAdvancedTab
-        {
-            get
-            {
-                return this.showAdvancedTab;
-            }
-            set
-            {
-                if (!Equals(value, this.showAdvancedTab))
-                {
-                    this.showAdvancedTab = value;
-                    this.NotifyOfPropertyChange(() => this.ShowAdvancedTab);
-                }
-            }
-        }
+        public FramerateMode FramerateMode { get; set; }
 
-        #endregion
+        public double? Quality { get; set; }
 
-        #region MetaData
+        public int? VideoBitrate { get; set; }
 
-        /// <summary>
-        /// Gets or sets the meta data.
-        /// </summary>
+        public bool TwoPass { get; set; }
+
+        public bool TurboFirstPass { get; set; }
+
+        public double? Framerate { get; set; }
+
+
+        /* Audio */
+
+        public ObservableCollection<AudioTrack> AudioTracks { get; set; }
+
+        public AllowedPassthru AllowedPassthruOptions { get; set; }
+
+        /* Subtitles */
+
+        public ObservableCollection<SubtitleTrack> SubtitleTracks { get; set; }
+        
+        /* Chapters */
+
+        public bool IncludeChapterMarkers { get; set; }
+
+        public string ChapterMarkersFilePath { get; set; }
+
+        public ObservableCollection<ChapterMarker> ChapterNames { get; set; }
+
+
+        /* Metadata */
+        
         public MetaData MetaData { get; set; }
-        #endregion
 
-        #region Preview
+        /* Previews */
 
-        /// <summary>
-        /// Gets or sets a value indicating whether IsPreviewEncode.
-        /// </summary>
         public bool IsPreviewEncode { get; set; }
 
-        /// <summary>
-        /// Gets or sets PreviewEncodeDuration.
-        /// </summary>
         public int? PreviewEncodeDuration { get; set; }
 
-        /// <summary>
-        /// Gets or sets PreviewEncodeStartAt.
-        /// </summary>
         public int? PreviewEncodeStartAt { get; set; }
-
-        #endregion
     }
 }

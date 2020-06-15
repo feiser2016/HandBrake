@@ -6,13 +6,14 @@
 
 #import "HBSubtitlesController.h"
 #import "HBSubtitlesDefaultsController.h"
+#import "HBTrackTitleViewController.h"
 
 @import HandBrakeKit;
 
 @interface HBSubtitlesController ()
 
-// Defaults
 @property (nonatomic, readwrite, strong) HBSubtitlesDefaultsController *defaultsController;
+@property (nonatomic, weak) IBOutlet NSTableView *table;
 
 @end
 
@@ -70,14 +71,25 @@
     }];
 }
 
-#pragma mark - Srt import
+- (IBAction)showAdditionalSettingsPopOver:(id)sender
+{
+    HBTrackTitleViewController *controller = [[HBTrackTitleViewController alloc] init];
+    NSInteger index = [self.table rowForView:sender];
+    if (index != -1)
+    {
+        controller.track = [self.subtitles objectInTracksAtIndex:index];
+        [self presentViewController:controller asPopoverRelativeToRect:[sender bounds] ofView:sender preferredEdge:NSRectEdgeMinX behavior:NSPopoverBehaviorTransient];
+    }
+}
+
+#pragma mark - External subtitles import
 
 /**
- *  Imports a srt file.
+ *  Imports a srt/ssa file.
  *
  *  @param sender
  */
-- (IBAction)browseImportSrtFile:(id)sender
+- (IBAction)browseImportExternalFile:(id)sender
 {
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.allowsMultipleSelection = NO;
@@ -85,27 +97,27 @@
     panel.canChooseDirectories = NO;
 
     NSURL *sourceDirectory;
-    if ([[NSUserDefaults standardUserDefaults] URLForKey:@"LastSrtImportDirectoryURL"])
+    if ([[NSUserDefaults standardUserDefaults] URLForKey:@"LastExternalSubImportDirectoryURL"])
     {
-        sourceDirectory = [[NSUserDefaults standardUserDefaults] URLForKey:@"LastSrtImportDirectoryURL"];
+        sourceDirectory = [[NSUserDefaults standardUserDefaults] URLForKey:@"LastExternalSubImportDirectoryURL"];
     }
     else
     {
-        sourceDirectory = [[NSURL fileURLWithPath:NSHomeDirectory()] URLByAppendingPathComponent:@"Desktop"];
+        sourceDirectory = [[NSURL fileURLWithPath:NSHomeDirectory()] URLByAppendingPathComponent:@"Desktop" isDirectory:YES];
     }
 
     panel.directoryURL = sourceDirectory;
-    panel.allowedFileTypes = @[@"srt"];
+    panel.allowedFileTypes = @[@"srt", @"ssa", @"ass"];
 
     [panel beginSheetModalForWindow:self.view.window completionHandler:^(NSInteger result)
     {
         if (result == NSModalResponseOK)
         {
-            NSURL *importSrtFileURL = panel.URL;
-            NSURL *importSrtDirectory = importSrtFileURL.URLByDeletingLastPathComponent;
-            [[NSUserDefaults standardUserDefaults] setURL:importSrtDirectory forKey:@"LastSrtImportDirectoryURL"];
+            NSURL *importFileURL = panel.URL;
+            NSURL *importDirectory = importFileURL.URLByDeletingLastPathComponent;
+            [[NSUserDefaults standardUserDefaults] setURL:importDirectory forKey:@"LastExternalSubImportDirectoryURL"];
 
-            [self.subtitles addSrtTrackFromURL:importSrtFileURL];
+            [self.subtitles addExternalTrackFromURL:importFileURL];
         }
     }];
 }

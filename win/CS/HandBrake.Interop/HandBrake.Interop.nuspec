@@ -11,11 +11,11 @@
     <iconUrl>https://avatars1.githubusercontent.com/u/627269</iconUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>$description$</description>
-    <copyright>Copyright © 2003-2018 HandBrake Team</copyright>
+    <copyright>Copyright © 2003-2020 HandBrake Team</copyright>
     <tags>Open-Source Video Transcoder</tags>
 
     <dependencies>
-      <dependency id="Newtonsoft.Json" version="11.0.2" />
+      <dependency id="Newtonsoft.Json" version="12.0.2" />
     </dependencies>
   </metadata>
 

@@ -11,6 +11,7 @@ namespace HandBrakeWPF.ViewModels
 {
     using System;
     using System.Collections.Generic;
+    using System.Collections.ObjectModel;
     using System.ComponentModel;
     using System.Diagnostics;
     using System.IO;
@@ -20,6 +21,8 @@ namespace HandBrakeWPF.ViewModels
     using Caliburn.Micro;
 
     using HandBrakeWPF.EventArgs;
+    using HandBrakeWPF.Extensions;
+    using HandBrakeWPF.Model.Options;
     using HandBrakeWPF.Properties;
     using HandBrakeWPF.Services.Interfaces;
     using HandBrakeWPF.Services.Queue.Interfaces;
@@ -29,65 +32,32 @@ namespace HandBrakeWPF.ViewModels
 
     using Microsoft.Win32;
 
-    using EncodeCompletedEventArgs = Services.Encode.EventArgs.EncodeCompletedEventArgs;
-    using EncodeProgressEventArgs = Services.Encode.EventArgs.EncodeProgressEventArgs;
-
-    /// <summary>
-    /// The Preview View Model
-    /// </summary>
     public class QueueViewModel : ViewModelBase, IQueueViewModel
     {
-        #region Constants and Fields
-
         private readonly IErrorService errorService;
         private readonly IUserSettingService userSettingService;
-        private readonly IQueueProcessor queueProcessor;
-        private bool isEncoding;
-        private string jobStatus;
+        private readonly IQueueService queueProcessor;
         private string jobsPending;
-        private string whenDoneAction;
+        private WhenDone whenDoneAction;
         private QueueTask selectedTask;
-
         private bool isQueueRunning;
 
-        #endregion
-
-        #region Constructors and Destructors
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="QueueViewModel"/> class.
-        /// </summary>
-        /// <param name="userSettingService">
-        /// The user Setting Service.
-        /// </param>
-        /// <param name="queueProcessor">
-        /// The Queue Processor Service 
-        /// </param>
-        /// <param name="errorService">
-        /// The Error Service 
-        /// </param>
-        public QueueViewModel(IUserSettingService userSettingService, IQueueProcessor queueProcessor, IErrorService errorService)
+        public QueueViewModel(IUserSettingService userSettingService, IQueueService queueProcessor, IErrorService errorService)
         {
             this.userSettingService = userSettingService;
             this.queueProcessor = queueProcessor;
             this.errorService = errorService;
             this.Title = Resources.QueueViewModel_Queue;
             this.JobsPending = Resources.QueueViewModel_NoEncodesPending;
-            this.JobStatus = Resources.QueueViewModel_NoJobsPending;
             this.SelectedItems = new BindingList<QueueTask>();
+            this.SelectedItems.ListChanged += this.SelectedItems_ListChanged;
             this.DisplayName = "Queue";
             this.IsQueueRunning = false;
-            
-            this.WhenDoneAction = this.userSettingService.GetUserSetting<string>(UserSettingConstants.WhenCompleteAction);
+            this.SelectedTabIndex = 0;
+
+            this.WhenDoneAction = (WhenDone)this.userSettingService.GetUserSetting<int>(UserSettingConstants.WhenCompleteAction);
         }
 
-        #endregion
-
-        #region Properties
-
-        /// <summary>
-        /// Gets or sets a value indicating whether the Queue is paused or not..
-        /// </summary>
         public bool IsQueueRunning
         {
             get
@@ -103,26 +73,6 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// Gets or sets JobStatus.
-        /// </summary>
-        public string JobStatus
-        {
-            get
-            {
-                return this.jobStatus;
-            }
-
-            set
-            {
-                this.jobStatus = value;
-                this.NotifyOfPropertyChange(() => this.JobStatus);
-            }
-        }
-
-        /// <summary>
-        /// Gets or sets JobsPending.
-        /// </summary>
         public string JobsPending
         {
             get
@@ -137,10 +87,7 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// Gets or sets WhenDoneAction.
-        /// </summary>
-        public string WhenDoneAction
+        public WhenDone WhenDoneAction
         {
             get
             {
@@ -154,10 +101,7 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// Gets the queue tasks.
-        /// </summary>
-        public BindingList<QueueTask> QueueTasks
+        public ObservableCollection<QueueTask> QueueTasks
         {
             get
             {
@@ -165,10 +109,7 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// Gets or sets the selected items.
-        /// </summary>
-        public BindingList<QueueTask> SelectedItems { get; set; }
+        public BindingList<QueueTask> SelectedItems { get; }
 
         public QueueTask SelectedTask
         {
@@ -183,40 +124,63 @@ namespace HandBrakeWPF.ViewModels
                 this.selectedTask = value;
                 this.NotifyOfPropertyChange(() => this.SelectedTask);
                 this.HandleLogData();
+
+                this.NotifyOfPropertyChange(() => this.CanRetryJob);
+                this.NotifyOfPropertyChange(() => this.CanEditJob);
+                this.NotifyOfPropertyChange(() => this.CanRemoveJob);
+                this.NotifyOfPropertyChange(() => this.CanPerformActionOnSource);
+                this.NotifyOfPropertyChange(() => this.CanPlayFile);
+                this.NotifyOfPropertyChange(() => this.StatsVisible);
+                this.NotifyOfPropertyChange(() => this.JobInfoVisible);
             }
         }
 
-        public bool ShowLogTab { get; private set; }
+        public bool JobInfoVisible
+        {
+            get
+            {
+                return SelectedItems.Count == 1;
+            }
+        }
+
+        public int SelectedTabIndex { get; set; }
 
         public string ActivityLog { get; private set; }
 
-        #endregion
+        public bool CanRetryJob => this.SelectedTask != null && this.SelectedTask.Status != QueueItemStatus.Waiting && this.SelectedTask.Status != QueueItemStatus.InProgress;
 
-        #region Public Methods
+        public bool CanEditJob => this.SelectedTask != null;
 
-        /// <summary>
-        /// Update the When Done Setting
-        /// </summary>
-        /// <param name="action">
-        /// The action.
-        /// </param>
-        public void WhenDone(string action)
+        public bool CanRemoveJob => this.SelectedTask != null;
+
+        public bool CanPerformActionOnSource => this.SelectedTask != null;
+
+        public bool CanPlayFile =>
+            this.SelectedTask != null && this.SelectedTask.Task.Destination != null && 
+            this.SelectedTask.Status == QueueItemStatus.Completed && File.Exists(this.SelectedTask.Task.Destination);
+
+        public bool StatsVisible
+        {
+            get
+            {
+                if (this.SelectedTask != null &&
+                    (this.selectedTask.Status == QueueItemStatus.Completed || this.selectedTask.Status == QueueItemStatus.Error || this.selectedTask.Status == QueueItemStatus.InProgress))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
+        public void WhenDone(int action)
         {
             this.WhenDone(action, true);
         }
 
-        /// <summary>
-        /// Update the When Done Setting
-        /// </summary>
-        /// <param name="action">
-        /// The action.
-        /// </param>
-        /// <param name="saveChange">
-        /// Save the change to the setting. Use false when updating UI.
-        /// </param>
-        public void WhenDone(string action, bool saveChange)
+        public void WhenDone(int action, bool saveChange)
         {
-            this.WhenDoneAction = action;
+            this.WhenDoneAction = (WhenDone)action;
 
             if (saveChange)
             {
@@ -227,90 +191,60 @@ namespace HandBrakeWPF.ViewModels
             ovm.UpdateSettings();
         }
 
-        /// <summary>
-        /// Clear the Queue
-        /// </summary>
         public void Clear()
         {
             MessageBoxResult result = this.errorService.ShowMessageBox(
-                Resources.QueueViewModel_ClearQueueConfrimation, Resources.Confirm, MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                Resources.QueueViewModel_ClearQueueConfrimation, Resources.Confirm, MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result == MessageBoxResult.Yes)
             {
                 this.queueProcessor.Clear();
             }
         }
 
-        /// <summary>
-        /// Clear Completed Items
-        /// </summary>
         public void ClearCompleted()
         {
             this.queueProcessor.ClearCompleted();
         }
 
-        /// <summary>
-        /// Close this window.
-        /// </summary>
         public void Close()
         {
             this.TryClose();
         }
 
-        /// <summary>
-        /// Handle the On Window Load
-        /// </summary>
         public override void OnLoad()
         {
             // Setup the window to the correct state.
-            this.IsQueueRunning = this.queueProcessor.EncodeService.IsEncoding;
+            this.IsQueueRunning = this.queueProcessor.IsProcessing;
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
 
             base.OnLoad();
         }
 
-        /// <summary>
-        /// Can Pause the Queue.
-        /// Used by Caliburn Micro to enable/disable the context menu item.
-        /// </summary>
-        /// <returns>
-        /// True when we can pause the queue.
-        /// </returns>
         public bool CanPauseQueue()
         {
             return this.IsQueueRunning;
         }
 
-        /// <summary>
-        /// Pause the Queue
-        /// </summary>
         public void PauseQueue()
         {
             this.queueProcessor.Pause();
 
-            this.JobStatus = Resources.QueueViewModel_QueuePending;
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
             this.IsQueueRunning = false;
-
-            MessageBox.Show(Resources.QueueViewModel_QueuePauseNotice, Resources.QueueViewModel_Queue, 
-                MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
-        /// <summary>
-        /// Pause the Queue
-        /// </summary>
-        /// <remarks>
-        /// Prevents evaluation of CanPauseQueue
-        /// </remarks>
         public void PauseQueueToolbar()
         {
             this.PauseQueue();
         }
 
-        /// <summary>
-        /// The remove selected jobs.
-        /// </summary>
         public void RemoveSelectedJobs()
         {
+            if (this.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
             MessageBoxResult result =
                   this.errorService.ShowMessageBox(
                       Resources.QueueViewModel_DelSelectedJobConfirmation,
@@ -323,19 +257,13 @@ namespace HandBrakeWPF.ViewModels
                 return;
             }
 
-            List<QueueTask> tasksToRemove = this.SelectedItems.ToList();
+            List<QueueTask> tasksToRemove = this.SelectedItems.OrderBy(s => s.Status).ToList();
             foreach (QueueTask job in tasksToRemove)
             {
                 this.RemoveJob(job);
             }
         }
 
-        /// <summary>
-        /// Remove a Job from the queue
-        /// </summary>
-        /// <param name="queueTask">
-        /// The Job to remove from the queue
-        /// </param>
         public void RemoveJob(object queueTask)
         {
             QueueTask task = queueTask as QueueTask;
@@ -344,43 +272,44 @@ namespace HandBrakeWPF.ViewModels
                 return;
             }
 
+            bool removed = false;
+            int index = this.QueueTasks.IndexOf(task);
+
             if (task.Status == QueueItemStatus.InProgress)
             {
                 MessageBoxResult result =
                     this.errorService.ShowMessageBox(
-                        Resources.QueueViewModel_JobCurrentlyRunningWarning, 
-                        Resources.Warning, 
-                        MessageBoxButton.YesNo, 
+                        Resources.QueueViewModel_JobCurrentlyRunningWarning,
+                        Resources.Warning,
+                        MessageBoxButton.YesNo,
                         MessageBoxImage.Question);
 
                 if (result == MessageBoxResult.Yes)
                 {
-                    this.queueProcessor.EncodeService.Stop();
+                    this.queueProcessor.Stop();
                     this.queueProcessor.Remove(task);
+                    removed = true;
                 }
             }
             else
             {
                 this.queueProcessor.Remove(task);
+                removed = true;
+            }
+
+            if (this.QueueTasks.Any() && removed)
+            {              
+                this.SelectedTask = index > 1 ? this.QueueTasks[index - 1] : this.QueueTasks.FirstOrDefault();
             }
         }
 
-        /// <summary>
-        /// Reset the job state to waiting.
-        /// </summary>
-        /// <param name="task">
-        /// The task.
-        /// </param>
         public void RetryJob(QueueTask task)
         {
-            task.Status = QueueItemStatus.Waiting;
-            this.queueProcessor.BackupQueue(null);
+            this.queueProcessor.RetryJob(task);
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
+            this.NotifyOfPropertyChange(() => this.CanRetryJob);
         }
 
-        /// <summary>
-        /// Start Encode
-        /// </summary>
         public void StartQueue()
         {
             if (!this.QueueTasks.Any(a => a.Status == QueueItemStatus.Waiting || a.Status == QueueItemStatus.InProgress))
@@ -392,31 +321,46 @@ namespace HandBrakeWPF.ViewModels
 
             var firstOrDefault = this.QueueTasks.FirstOrDefault(s => s.Status == QueueItemStatus.Waiting);
             if (firstOrDefault != null && !DriveUtilities.HasMinimumDiskSpace(firstOrDefault.Task.Destination,
-                    this.userSettingService.GetUserSetting<long>(UserSettingConstants.PauseOnLowDiskspaceLevel)))
+                    this.userSettingService.GetUserSetting<long>(UserSettingConstants.PauseQueueOnLowDiskspaceLevel)))
             {
-                this.errorService.ShowMessageBox(Resources.Main_LowDiskspace, Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
+                MessageBoxResult result = this.errorService.ShowMessageBox(Resources.Main_LowDiskspace, Resources.Warning, MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (result == MessageBoxResult.No)
+                {
+                    return;
+                }
             }
 
-            this.JobStatus = Resources.QueueViewModel_QueueStarted;
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
             this.IsQueueRunning = true;
 
-            this.queueProcessor.Start(userSettingService.GetUserSetting<bool>(UserSettingConstants.ClearCompletedFromQueue));
+            this.queueProcessor.Start();
         }
 
-        /// <summary>
-        /// Export the Queue to a file.
-        /// </summary>
+        public void ExportCli()
+        {
+            SaveFileDialog dialog = new SaveFileDialog
+            {
+                Filter = "Json (*.json)|*.json",
+                OverwritePrompt = true,
+                DefaultExt = ".json",
+                AddExtension = true
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                this.queueProcessor.ExportCliJson(dialog.FileName);
+            }
+        }
+
         public void Export()
         {
             SaveFileDialog dialog = new SaveFileDialog
-                {
-                    Filter = "Json (*.json)|*.json", 
-                    OverwritePrompt = true, 
-                    DefaultExt = ".json", 
-                    AddExtension = true
-                };
+                                    {
+                                        Filter = "Json (*.json)|*.json",
+                                        OverwritePrompt = true,
+                                        DefaultExt = ".json",
+                                        AddExtension = true
+                                    };
 
             if (dialog.ShowDialog() == true)
             {
@@ -424,9 +368,6 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// Import a saved queue
-        /// </summary>
         public void Import()
         {
             OpenFileDialog dialog = new OpenFileDialog { Filter = "Json (*.json)|*.json", CheckFileExists = true };
@@ -436,18 +377,12 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// Edit this Job
-        /// </summary>
-        /// <param name="task">
-        /// The task.
-        /// </param>
         public void EditJob(QueueTask task)
         {
             MessageBoxResult result = this.errorService.ShowMessageBox(
-                Resources.QueueViewModel_EditConfrimation, 
-                "Modify Job?", 
-                MessageBoxButton.YesNo, 
+                Resources.QueueViewModel_EditConfrimation,
+                "Modify Job?",
+                MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
 
             if (result != MessageBoxResult.Yes)
@@ -461,6 +396,16 @@ namespace HandBrakeWPF.ViewModels
             // Pass a copy of the job back to the Main Screen
             IMainViewModel mvm = IoC.Get<IMainViewModel>();
             mvm.EditQueueJob(task);
+        }
+
+        public void OpenSourceDir()
+        {
+            this.OpenSourceDirectory(this.SelectedTask);
+        }
+
+        public void OpenDestDir()
+        {
+            this.OpenDestinationDirectory(this.SelectedTask);
         }
 
         public void OpenSourceDirectory(QueueTask task)
@@ -479,58 +424,103 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        #endregion
+        public void ResetSelectedJobs()
+        {
+            foreach (var task in this.SelectedItems)
+            {
+                if (task.Status == QueueItemStatus.Completed || task.Status == QueueItemStatus.Error)
+                {
+                    this.RetryJob(task);
+                }
+            }       
+        }
 
-        #region Methods
+        public void ResetAllJobs()
+        {
+            foreach (var task in this.QueueTasks)
+            {
+                if (task.Status == QueueItemStatus.Completed || task.Status == QueueItemStatus.Error)
+                {
+                    this.RetryJob(task);
+                }
+            }
+        }
+        
+        public void ResetFailed()
+        {
+            foreach (var task in this.QueueTasks)
+            {
+                if (task.Status == QueueItemStatus.Error)
+                {
+                    this.RetryJob(task);
+                }
+            }
+        }
+
+        public void PlayFile()
+        {
+            if (this.SelectedTask != null && this.SelectedTask.Task != null && File.Exists(this.SelectedTask.Task.Destination))
+            {
+                Process.Start(this.SelectedTask.Task.Destination);
+            }
+        }
+
+        public void MoveUp()
+        {
+            Dictionary<int, QueueTask> tasks = new Dictionary<int, QueueTask>();
+            foreach (var item in this.SelectedItems)
+            {
+                tasks.Add(this.QueueTasks.IndexOf(item), item);
+            }
+
+            foreach (var item in tasks.OrderBy(s => s.Key))
+            {
+                this.QueueTasks.MoveUp(item.Value);
+            }
+        }
+
+        public void MoveDown()
+        {
+            Dictionary<int, QueueTask> tasks = new Dictionary<int, QueueTask>();
+            foreach (var item in this.SelectedItems)
+            {
+                tasks.Add(this.QueueTasks.IndexOf(item), item);
+            }
+
+            foreach (var item in tasks.OrderByDescending(s => s.Key))
+            {
+                this.QueueTasks.MoveDown(item.Value);
+            }
+        }
 
         public void Activate()
         {
-            this.queueProcessor.QueueCompleted += this.queueProcessor_QueueCompleted;
-            this.queueProcessor.QueueChanged += this.QueueManager_QueueChanged;
-            this.queueProcessor.JobProcessingStarted += this.QueueProcessorJobProcessingStarted;
-            this.queueProcessor.QueuePaused += this.QueueProcessor_QueuePaused;
+           this.OnActivate();
         }
 
         public void Deactivate()
         {
-            this.queueProcessor.QueueCompleted -= this.queueProcessor_QueueCompleted;
-            this.queueProcessor.QueueChanged -= this.QueueManager_QueueChanged;
-            this.queueProcessor.JobProcessingStarted -= this.QueueProcessorJobProcessingStarted;
-            this.queueProcessor.QueuePaused -= this.QueueProcessor_QueuePaused;
+           this.OnDeactivate(false);
         }
 
-        /// <summary>
-        /// Override the OnActive to run the Screen Loading code in the view model base.
-        /// </summary>
         protected override void OnActivate()
         {
             this.Load();
 
-            this.queueProcessor.QueueCompleted += this.queueProcessor_QueueCompleted;
+            this.queueProcessor.QueueCompleted += this.QueueProcessor_QueueCompleted;
             this.queueProcessor.QueueChanged += this.QueueManager_QueueChanged;
-            this.queueProcessor.EncodeService.EncodeStatusChanged += this.EncodeService_EncodeStatusChanged;
-            this.queueProcessor.EncodeService.EncodeCompleted += this.EncodeService_EncodeCompleted;
             this.queueProcessor.JobProcessingStarted += this.QueueProcessorJobProcessingStarted;
             this.queueProcessor.QueuePaused += this.QueueProcessor_QueuePaused;
 
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
-            this.JobStatus = Resources.QueueViewModel_QueueReady;
 
             base.OnActivate();
         }
 
-        /// <summary>
-        /// Override the Deactivate
-        /// </summary>
-        /// <param name="close">
-        /// The close.
-        /// </param>
         protected override void OnDeactivate(bool close)
         {
-            this.queueProcessor.QueueCompleted -= this.queueProcessor_QueueCompleted;
+            this.queueProcessor.QueueCompleted -= this.QueueProcessor_QueueCompleted;
             this.queueProcessor.QueueChanged -= this.QueueManager_QueueChanged;
-            this.queueProcessor.EncodeService.EncodeStatusChanged -= this.EncodeService_EncodeStatusChanged;
-            this.queueProcessor.EncodeService.EncodeCompleted -= this.EncodeService_EncodeCompleted;
             this.queueProcessor.JobProcessingStarted -= this.QueueProcessorJobProcessingStarted;
             this.queueProcessor.QueuePaused -= this.QueueProcessor_QueuePaused;
 
@@ -543,16 +533,22 @@ namespace HandBrakeWPF.ViewModels
             {
                 if (!string.IsNullOrEmpty(directory))
                 {
+                    if (File.Exists(directory))
+                    {
+                        string argument = "/select, \"" + directory + "\"";
+                        Process.Start("explorer.exe", argument);
+                        return;
+                    }
+                    
                     if (!File.Exists(directory) && !directory.EndsWith("\\"))
                     {
-                        directory = directory + "\\";
+                        directory = Path.GetDirectoryName(directory) + "\\";
                     }
 
                     directory = Path.GetDirectoryName(directory);
                     if (directory != null && Directory.Exists(directory))
                     {
                         Process.Start(directory);
-
                     }
                 }
             }
@@ -562,11 +558,31 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
+        public void OpenLogDirectory()
+        {
+            string logDir = DirectoryUtilities.GetLogDirectory();
+            string windir = Environment.GetEnvironmentVariable("WINDIR");
+            Process prc = new Process { StartInfo = { FileName = windir + @"\explorer.exe", Arguments = logDir } };
+            prc.Start();
+        }
+
+        public void CopyLog()
+        {
+            try
+            {
+                Clipboard.SetDataObject(this.ActivityLog, true);
+            }
+            catch (Exception exc)
+            {
+                this.errorService.ShowError(Resources.Clipboard_Unavailable, Resources.Clipboard_Unavailable_Solution, exc);
+            }
+        }
+
         private void HandleLogData()
         {
-            if (this.SelectedTask == null || this.SelectedTask.Status == QueueItemStatus.InProgress)
+            if (this.SelectedTask == null || this.SelectedTask.Status == QueueItemStatus.InProgress || this.SelectedTask.Status == QueueItemStatus.Waiting)
             {
-                this.ShowLogTab = false;
+                this.ActivityLog = Resources.QueueView_LogNotAvailableYet;
             }
             else
             {
@@ -581,146 +597,72 @@ namespace HandBrakeWPF.ViewModels
                             string logContent = logReader.ReadToEnd();
                             this.ActivityLog = logContent;
                         }
-
-                        this.ShowLogTab = true;
+                    }
+                    else
+                    {
+                        this.ActivityLog = string.Empty;
                     }
                 }
                 catch (Exception exc)
                 {
                     Debug.WriteLine(exc);
-                    this.ShowLogTab = true;
                     this.ActivityLog = exc.ToString();
                 }
             }
 
-            this.NotifyOfPropertyChange(() => this.ShowLogTab);
             this.NotifyOfPropertyChange(() => this.ActivityLog);
         }
 
-        /// <summary>
-        /// Handle the Encode Status Changed Event.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The EncodeProgressEventArgs.
-        /// </param>
-        private void EncodeService_EncodeStatusChanged(object sender, EncodeProgressEventArgs e)
+        private void SelectedItems_ListChanged(object sender, ListChangedEventArgs e)
         {
-            Execute.OnUIThread(() =>
-            {
-                string jobsPending = string.Format(Resources.Main_JobsPending_addon, this.queueProcessor.Count);
-                if (e.IsSubtitleScan)
-                {
-                    this.JobStatus = string.Format(Resources.MainViewModel_EncodeStatusChanged_SubScan_StatusLabel,
-                        e.Task,
-                        e.TaskCount,
-                        e.PercentComplete,
-                        e.EstimatedTimeLeft,
-                        e.ElapsedTime,
-                        jobsPending);
-                }
-                else if (e.IsMuxing)
-                {
-                    this.JobStatus = ResourcesUI.MainView_Muxing;
-                }
-                else if (e.IsSearching)
-                {
-                    this.JobStatus = string.Format(ResourcesUI.MainView_ProgressStatusWithTask, ResourcesUI.MainView_Searching, e.PercentComplete, e.EstimatedTimeLeft, jobsPending);
-                }
-                else
-                {
-                    this.JobStatus =
-                        string.Format(Resources.MainViewModel_EncodeStatusChanged_StatusLabel,
-                            e.Task,
-                            e.TaskCount,
-                            e.PercentComplete,
-                            e.CurrentFrameRate,
-                            e.AverageFrameRate,
-                            e.EstimatedTimeLeft,
-                            e.ElapsedTime,
-                            jobsPending);
-                }
-            });
-        }
+            this.NotifyOfPropertyChange(() => this.JobInfoVisible);
 
-        /// <summary>
-        /// Handle the Queue Changed Event.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The e.
-        /// </param>
+            if (!this.JobInfoVisible)
+            {
+                this.SelectedTabIndex = 0;
+                this.NotifyOfPropertyChange(() => this.SelectedTabIndex);
+            }
+        }
+        
         private void QueueManager_QueueChanged(object sender, EventArgs e)
         {
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
 
             if (!queueProcessor.IsProcessing)
             {
-                this.JobStatus = Resources.QueueViewModel_QueueNotRunning;
                 this.IsQueueRunning = false;
             }
+
+            this.NotifyOfPropertyChange(() => this.CanRetryJob);
+            this.NotifyOfPropertyChange(() => this.CanEditJob);
+            this.NotifyOfPropertyChange(() => this.CanRemoveJob);
+            this.NotifyOfPropertyChange(() => this.CanPerformActionOnSource);
+            this.NotifyOfPropertyChange(() => this.CanPlayFile);
+            this.NotifyOfPropertyChange(() => this.StatsVisible);
+            this.NotifyOfPropertyChange(() => this.JobInfoVisible);
+            this.HandleLogData();
         }
 
-        /// <summary>
-        /// Handle the Queue Completed Event
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The EventArgs.
-        /// </param>
-        private void queueProcessor_QueueCompleted(object sender, EventArgs e)
+        private void QueueProcessor_QueueCompleted(object sender, EventArgs e)
         {
-            this.JobStatus = Resources.QueueViewModel_QueueCompleted;
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
             this.IsQueueRunning = false;
+            this.NotifyOfPropertyChange(() => this.SelectedTask);
+            this.NotifyOfPropertyChange(() => this.StatsVisible);
+            this.NotifyOfPropertyChange(() => this.CanRetryJob);
+            this.NotifyOfPropertyChange(() => this.JobInfoVisible);
         }
 
-        /// <summary>
-        /// The encode service_ encode completed.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The e.
-        /// </param>
-        private void EncodeService_EncodeCompleted(object sender, EncodeCompletedEventArgs e)
-        {
-            if (!this.queueProcessor.IsProcessing)
-            {
-                this.JobStatus = Resources.QueueViewModel_LastJobFinished;
-            }
-        }
-
-        /// <summary>
-        /// The queue processor job processing started.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The QueueProgressEventArgs.
-        /// </param>
         private void QueueProcessorJobProcessingStarted(object sender, QueueProgressEventArgs e)
         {
-            this.JobStatus = Resources.QueueViewModel_QueueStarted;
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
-            this.IsQueueRunning = true; 
+            this.IsQueueRunning = true;
         }
 
         private void QueueProcessor_QueuePaused(object sender, EventArgs e)
         {
-            this.JobStatus = Resources.QueueViewModel_QueuePaused;
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
             this.IsQueueRunning = false;
         }
-
-        #endregion
     }
 }

@@ -1,28 +1,25 @@
 ---
 name: Feature request
-about: Suggest an idea for this project
-
+about: Suggest an idea for this project. Please note, requesting third-party library updates is not required; we periodically update these in batches.
 ---
 
-### Describe the change or feature you'd like to see added to HandBrake:
+### Description of the feature or enhancement you'd like to see in HandBrake:
 
-A clear and concise description of what you want to happen.
+Please replace this text with information about the feature request you'd like to see implemented and why.
 
+### What version of HandBrake are you currently running (e.g., 1.3.0)?
 
-### What version of HandBrake are you currently using? (e.g., 1.0.0)
+Please replace this text with the version of HandBrake that you are currently running. 
 
-HandBrake version here.
+### What operating system and version are you running (e.g., Ubuntu 19.10, macOS 10.15 Catalina, Windows 10 1909)?
 
-### What operating system and version are you running? (e.g., Ubuntu 16.04 LTS, macOS 10.3 High Sierra, Windows 10 Creators Update)
+Please replace this text with the version of the operation system you are running.
 
-OS and version here.
+### HandBrake Activity Log:
 
-### HandBrake Activity Log ***required*** (see https://handbrake.fr/docs/en/latest/help/activity-log.html)
-
-If the request is off the back of failure or unsupported file format, please post a lot as it can help us track down what is missing. 
-
-Drag and drop file or...
+If this request is related to an error or unsupported file, an Activity Log will help us track down what exactly is not working properly or not implemented. Please read https://handbrake.fr/docs/en/latest/help/activity-log.html for more information.
 
 ~~~
-Paste log text between these markers.
+Please replace this text with the Activity Log, or upload the log file to Github by dragging and dropping the file on this post.
+Leave the ~ marks above and below.
 ~~~

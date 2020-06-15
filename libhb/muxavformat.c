@@ -1,6 +1,6 @@
 /* muxavformat.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -12,8 +12,10 @@
 #include "libavutil/avstring.h"
 #include "libavutil/intreadwrite.h"
 
-#include "hb.h"
-#include "lang.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/ssautil.h"
+#include "handbrake/lang.h"
+#include "handbrake/hbffmpeg.h"
 
 struct hb_mux_data_s
 {
@@ -33,7 +35,8 @@ struct hb_mux_data_s
     int64_t  prev_chapter_tc;
     int16_t  current_chapter;
 
-    AVBSFContext             * bitstream_context;
+    AVBSFContext            * bitstream_context;
+    hb_tx3g_style_context_t * tx3g;
 };
 
 struct hb_mux_object_s
@@ -68,6 +71,7 @@ enum
 {
     META_MUX_MP4,
     META_MUX_MKV,
+    META_MUX_WEBM,
     META_MUX_LAST
 };
 
@@ -96,10 +100,12 @@ static char* lookup_lang_code(int mux, char *iso639_2)
             out = iso639_2;
             break;
         case HB_MUX_AV_MKV:
+        case HB_MUX_AV_WEBM: // webm is a subset of mkv
             // MKV lang codes should be ISO-639-2B if it exists,
             // else ISO-639-2
             lang =  lang_for_code2( iso639_2 );
-            out = lang->iso639_2b ? lang->iso639_2b : lang->iso639_2;
+            out = lang->iso639_2b && *lang->iso639_2b ? lang->iso639_2b :
+                                                        lang->iso639_2;
             break;
         default:
             break;
@@ -162,6 +168,15 @@ static int avformatInit( hb_mux_object_t * m )
             meta_mux = META_MUX_MKV;
             break;
 
+        case HB_MUX_AV_WEBM:
+            // libavformat is essentially hard coded such that it only
+            // works with a timebase of 1/1000
+            m->time_base.num = 1;
+            m->time_base.den = 1000;
+            muxer_name = "webm";
+            meta_mux = META_MUX_WEBM;
+            break;
+
         default:
         {
             hb_error("Invalid Mux %x", job->mux);
@@ -207,8 +222,6 @@ static int avformatInit( hb_mux_object_t * m )
         case HB_VCODEC_X264_8BIT:
         case HB_VCODEC_X264_10BIT:
         case HB_VCODEC_QSV_H264:
-        case HB_VCODEC_FFMPEG_VCE_H264:
-        case HB_VCODEC_FFMPEG_NVENC_H264:
             track->st->codecpar->codec_id = AV_CODEC_ID_H264;
             if (job->mux == HB_MUX_AV_MP4 && job->inline_parameter_sets)
             {
@@ -252,35 +265,66 @@ static int avformatInit( hb_mux_object_t * m )
                    job->config.h264.pps, job->config.h264.pps_length );
             break;
 
-        case HB_VCODEC_FFMPEG_MPEG4:
-            track->st->codecpar->codec_id = AV_CODEC_ID_MPEG4;
-
-            if (job->config.mpeg4.length != 0)
+        case HB_VCODEC_FFMPEG_VCE_H264:
+        case HB_VCODEC_FFMPEG_NVENC_H264:
+        case HB_VCODEC_FFMPEG_VT_H264:
+            track->st->codecpar->codec_id = AV_CODEC_ID_H264;
+            if (job->mux == HB_MUX_AV_MP4 && job->inline_parameter_sets)
             {
-                priv_size = job->config.mpeg4.length;
+                track->st->codecpar->codec_tag = MKTAG('a','v','c','3');
+            }
+            else
+            {
+                track->st->codecpar->codec_tag = MKTAG('a','v','c','1');
+            }
+            if (job->config.extradata.length > 0)
+            {
+                priv_size = job->config.extradata.length;
                 priv_data = av_malloc(priv_size + AV_INPUT_BUFFER_PADDING_SIZE);
                 if (priv_data == NULL)
                 {
-                    hb_error("MPEG4 extradata: malloc failure");
+                    hb_error("H.264 extradata: malloc failure");
                     goto error;
                 }
-                memcpy(priv_data, job->config.mpeg4.bytes, priv_size);
+                memcpy(priv_data,
+                       job->config.extradata.bytes,
+                       job->config.extradata.length);
+            }
+            break;
+
+        case HB_VCODEC_FFMPEG_MPEG4:
+            track->st->codecpar->codec_id = AV_CODEC_ID_MPEG4;
+
+            if (job->config.extradata.length > 0)
+            {
+                priv_size = job->config.extradata.length;
+                priv_data = av_malloc(priv_size + AV_INPUT_BUFFER_PADDING_SIZE);
+                if (priv_data == NULL)
+                {
+                    hb_error("MPEG-4 extradata: malloc failure");
+                    goto error;
+                }
+                memcpy(priv_data,
+                       job->config.extradata.bytes,
+                       job->config.extradata.length);
             }
             break;
 
         case HB_VCODEC_FFMPEG_MPEG2:
             track->st->codecpar->codec_id = AV_CODEC_ID_MPEG2VIDEO;
 
-            if (job->config.mpeg4.length != 0)
+            if (job->config.extradata.length > 0)
             {
-                priv_size = job->config.mpeg4.length;
+                priv_size = job->config.extradata.length;
                 priv_data = av_malloc(priv_size + AV_INPUT_BUFFER_PADDING_SIZE);
                 if (priv_data == NULL)
                 {
-                    hb_error("MPEG2 extradata: malloc failure");
+                    hb_error("MPEG-2 extradata: malloc failure");
                     goto error;
                 }
-                memcpy(priv_data, job->config.mpeg4.bytes, priv_size);
+                memcpy(priv_data,
+                       job->config.extradata.bytes,
+                       job->config.extradata.length);
             }
             break;
 
@@ -334,8 +378,6 @@ static int avformatInit( hb_mux_object_t * m )
         case HB_VCODEC_X265_16BIT:
         case HB_VCODEC_QSV_H265:
         case HB_VCODEC_QSV_H265_10BIT:
-        case HB_VCODEC_FFMPEG_VCE_H265:
-        case HB_VCODEC_FFMPEG_NVENC_H265:
             track->st->codecpar->codec_id  = AV_CODEC_ID_HEVC;
             if (job->mux == HB_MUX_AV_MP4 && job->inline_parameter_sets)
             {
@@ -356,6 +398,33 @@ static int avformatInit( hb_mux_object_t * m )
                     goto error;
                 }
                 memcpy(priv_data, job->config.h265.headers, priv_size);
+            }
+            break;
+
+        case HB_VCODEC_FFMPEG_VCE_H265:
+        case HB_VCODEC_FFMPEG_NVENC_H265:
+        case HB_VCODEC_FFMPEG_VT_H265:
+            track->st->codecpar->codec_id  = AV_CODEC_ID_HEVC;
+            if (job->mux == HB_MUX_AV_MP4 && job->inline_parameter_sets)
+            {
+                track->st->codecpar->codec_tag = MKTAG('h','e','v','1');
+            }
+            else
+            {
+                track->st->codecpar->codec_tag = MKTAG('h','v','c','1');
+            }
+            if (job->config.extradata.length > 0)
+            {
+                priv_size = job->config.extradata.length;
+                priv_data = av_malloc(priv_size + AV_INPUT_BUFFER_PADDING_SIZE);
+                if (priv_data == NULL)
+                {
+                    hb_error("H.265 extradata: malloc failure");
+                    goto error;
+                }
+                memcpy(priv_data,
+                       job->config.extradata.bytes,
+                       job->config.extradata.length);
             }
             break;
 
@@ -606,7 +675,7 @@ static int avformatInit( hb_mux_object_t * m )
             track->st->codecpar->channel_layout = hb_ff_mixdown_xlat(audio->config.out.mixdown, NULL);
         }
 
-        char *name;
+        const char *name;
         if (audio->config.out.name == NULL)
         {
             switch (track->st->codecpar->channels)
@@ -634,7 +703,7 @@ static int avformatInit( hb_mux_object_t * m )
         {
             // Some software (MPC, mediainfo) use hdlr description
             // for track title
-            av_dict_set(&track->st->metadata, "handler", name, 0);
+            av_dict_set(&track->st->metadata, "handler_name", name, 0);
         }
     }
 
@@ -785,16 +854,24 @@ static int avformatInit( hb_mux_object_t * m )
                 track->st->codecpar->codec_id = AV_CODEC_ID_HDMV_PGS_SUBTITLE;
             } break;
 
+            case DVBSUB:
+            {
+                track->st->codecpar->codec_id = AV_CODEC_ID_DVB_SUBTITLE;
+            } break;
+
             case CC608SUB:
             case CC708SUB:
             case TX3GSUB:
-            case SRTSUB:
             case UTF8SUB:
             case SSASUB:
+            case IMPORTSRT:
+            case IMPORTSSA:
             {
                 if (job->mux == HB_MUX_AV_MP4)
                 {
                     track->st->codecpar->codec_id = AV_CODEC_ID_MOV_TEXT;
+                    track->tx3g = hb_tx3g_style_init(
+                                job->height, (char*)subtitle->extradata);
                 }
                 else
                 {
@@ -889,6 +966,19 @@ static int avformatInit( hb_mux_object_t * m )
         if (lang != NULL)
         {
             av_dict_set(&track->st->metadata, "language", lang, 0);
+        }
+        if (subtitle->config.name != NULL && subtitle->config.name[0] != 0)
+        {
+            // Set subtitle track title
+            av_dict_set(&track->st->metadata, "title",
+                        subtitle->config.name, 0);
+            if (job->mux == HB_MUX_AV_MP4)
+            {
+                // Some software (MPC, mediainfo) use hdlr description
+                // for track title
+                av_dict_set(&track->st->metadata, "handler_name",
+                            subtitle->config.name, 0);
+            }
         }
     }
 
@@ -1074,7 +1164,7 @@ static int add_chapter(hb_mux_object_t *m, int64_t start, int64_t end, char * ti
     chap->id = nchap;
     chap->time_base = m->time_base;
     // libav does not currently have a good way to deal with chapters and
-    // delayed stream timestamps.  It makes no corrections to the chapter 
+    // delayed stream timestamps.  It makes no corrections to the chapter
     // track.  A patch to libav would touch a lot of things, so for now,
     // work around the issue here.
     chap->start = start;
@@ -1125,14 +1215,15 @@ static int avformatMux(hb_mux_object_t *m, hb_mux_data_t *track, hb_buffer_t *bu
         return 0;
     }
 
-    if (track->type == MUX_TYPE_VIDEO && (job->mux & HB_MUX_MASK_MKV) &&
+    if (track->type == MUX_TYPE_VIDEO &&
+        (job->mux & (HB_MUX_MASK_MKV | HB_MUX_MASK_WEBM)) &&
         buf->s.renderOffset < 0)
     {
         // libav matroska muxer doesn't write dts to the output, but
         // if it sees a negative dts, it applies an offset to both pts
         // and dts to make it positive.  This offset breaks chapter
         // start times and A/V sync.  libav also requires that dts is
-        // "monotically increasing", which means it last_dts <= next_dts.
+        // "monotonically increasing", which means it last_dts <= next_dts.
         // It also uses dts to determine track interleaving, so we need
         // to provide some reasonable dts value.
         // So when renderOffset < 0, set to 0 for mkv.
@@ -1175,10 +1266,20 @@ static int avformatMux(hb_mux_object_t *m, hb_mux_data_t *track, hb_buffer_t *bu
         // have zero duration.
         if (track->type == MUX_TYPE_SUBTITLE &&
             track->st->codecpar->codec_id != AV_CODEC_ID_HDMV_PGS_SUBTITLE)
+        {
             duration = av_rescale_q(10, (AVRational){1,1},
                                     track->st->time_base);
+        }
+        else if (track->type == MUX_TYPE_VIDEO)
+        {
+            duration = av_rescale_q(
+                            (int64_t)job->vrate.den * 90000 / job->vrate.num,
+                            (AVRational){1,90000}, track->st->time_base);
+        }
         else
+        {
             duration = 0;
+        }
     }
 
     av_init_packet(&pkt);
@@ -1289,8 +1390,8 @@ static int avformatMux(hb_mux_object_t *m, hb_mux_data_t *track, hb_buffer_t *bu
                      * creating style atoms for them.
                      */
                     hb_muxmp4_process_subtitle_style(
-                        job->height, buf->data, &buffer,
-                        &styleatom, &stylesize );
+                        track->tx3g, buf->data, &buffer,
+                        &styleatom, &stylesize);
 
                     if (buffer != NULL)
                     {
@@ -1397,6 +1498,10 @@ static int avformatEnd(hb_mux_object_t *m)
         if (m->tracks[ii]->bitstream_context)
         {
             av_bsf_free(&m->tracks[ii]->bitstream_context);
+        }
+        if (m->tracks[ii]->tx3g)
+        {
+            hb_tx3g_style_close(&m->tracks[ii]->tx3g);
         }
     }
 

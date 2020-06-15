@@ -15,11 +15,10 @@ endif
 
 ###############################################################################
 
-.PHONY: build clean archive install uninstall xclean doc report
+.PHONY: build clean install uninstall xclean doc report
 
 build:
 clean:
-archive:
 install:
 install-strip:
 uninstall:
@@ -35,8 +34,8 @@ mrproper: xclean
 include $(SRC/)make/include/base.rules
 
 include $(MODULES:%=$(SRC/)%/module.rules)
--include $(SRC/)make/variant/$(BUILD.system).rules
--include $(SRC/)make/variant/$(BUILD.system).$(BUILD.machine).rules
+-include $(SRC/)make/variant/$(HOST.system).rules
+-include $(SRC/)make/variant/$(HOST.system).$(HOST.machine).rules
 
 ###############################################################################
 

@@ -17,58 +17,50 @@ namespace HandBrakeWPF.Services
 
     using Caliburn.Micro;
 
-    using HandBrake.Interop.Utilities;
-
     using HandBrakeWPF.EventArgs;
+    using HandBrakeWPF.Model.Options;
     using HandBrakeWPF.Services.Interfaces;
     using HandBrakeWPF.Services.Queue.Interfaces;
+    using HandBrakeWPF.Services.Scan.Interfaces;
     using HandBrakeWPF.Utilities;
     using HandBrakeWPF.ViewModels.Interfaces;
 
     using EncodeCompletedEventArgs = HandBrakeWPF.Services.Encode.EventArgs.EncodeCompletedEventArgs;
-    using Execute = Caliburn.Micro.Execute;
+    using ILog = HandBrakeWPF.Services.Logging.Interfaces.ILog;
 
     /// <summary>
     /// The when done service.
     /// </summary>
     public class PrePostActionService : IPrePostActionService
     {
-        /// <summary>
-        /// The queue processor.
-        /// </summary>
-        private readonly IQueueProcessor queueProcessor;
-
-        /// <summary>
-        /// The user setting service.
-        /// </summary>
+        private readonly ILog log;
         private readonly IUserSettingService userSettingService;
-
-        /// <summary>
-        /// The window manager.
-        /// </summary>
         private readonly IWindowManager windowManager;
+        private readonly IScan scanService;
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="PrePostActionService"/> class.
-        /// </summary>
-        /// <param name="queueProcessor">
-        /// The queue processor.
-        /// </param>
-        /// <param name="userSettingService">
-        /// The user Setting Service.
-        /// </param>
-        /// <param name="windowManager">
-        /// The window Manager.
-        /// </param>
-        public PrePostActionService(IQueueProcessor queueProcessor, IUserSettingService userSettingService, IWindowManager windowManager)
+        public PrePostActionService(IQueueService queueProcessor, IUserSettingService userSettingService, IWindowManager windowManager, IScan scanService, ILog logService)
         {
-            this.queueProcessor = queueProcessor;
+            this.log = logService;
             this.userSettingService = userSettingService;
             this.windowManager = windowManager;
+            this.scanService = scanService;
 
-            this.queueProcessor.QueueCompleted += QueueProcessorQueueCompleted;
-            this.queueProcessor.EncodeService.EncodeCompleted += EncodeService_EncodeCompleted;
-            this.queueProcessor.EncodeService.EncodeStarted += EncodeService_EncodeStarted;
+            queueProcessor.QueueCompleted += this.QueueProcessorQueueCompleted;
+            queueProcessor.QueuePaused += this.QueueProcessor_QueuePaused;
+            queueProcessor.EncodeCompleted += this.EncodeService_EncodeCompleted;
+            queueProcessor.JobProcessingStarted += this.EncodeService_EncodeStarted;
+        }
+
+        private void QueueProcessor_QueuePaused(object sender, EventArgs e)
+        {
+            // Allow the system to sleep again.
+            Execute.OnUIThread(() =>
+            {
+                if (this.userSettingService.GetUserSetting<bool>(UserSettingConstants.PreventSleep))
+                {
+                    Win32.AllowSleep();
+                }
+            });
         }
 
         /// <summary>
@@ -102,22 +94,13 @@ namespace HandBrakeWPF.Services
             // Send the file to the users requested application
             if (e.Successful)
             {
-                this.SendToApplication(e.FileName);
+                this.SendToApplication(e.SourceFileName, e.FileName);
             }
 
             if (this.userSettingService.GetUserSetting<bool>(UserSettingConstants.PlaySoundWhenDone))
             {
                 this.PlayWhenDoneSound();
             }
-
-            // Allow the system to sleep again.
-            Execute.OnUIThread(() =>
-            {
-                if (this.userSettingService.GetUserSetting<bool>(UserSettingConstants.PreventSleep))
-                {
-                    Win32.AllowSleep();
-                }
-            });
         }
 
         /// <summary>
@@ -141,66 +124,82 @@ namespace HandBrakeWPF.Services
                 this.PlayWhenDoneSound();
             }
 
-            if (this.userSettingService.GetUserSetting<string>(UserSettingConstants.WhenCompleteAction) == "Do nothing")
+            if (this.userSettingService.GetUserSetting<int>(UserSettingConstants.WhenCompleteAction) == (int)WhenDone.DoNothing)
             {
                 return;
             }
 
             // Give the user the ability to cancel the shutdown. Default 60 second timer.
-            ICountdownAlertViewModel titleSpecificView = IoC.Get<ICountdownAlertViewModel>();
-            Execute.OnUIThread(
-                () =>
-                    {
-                        titleSpecificView.SetAction(this.userSettingService.GetUserSetting<string>(UserSettingConstants.WhenCompleteAction));
-                        this.windowManager.ShowDialog(titleSpecificView);
-                    });
-
-            if (!titleSpecificView.IsCancelled)
+            bool isCancelled = false;
+            if (!this.userSettingService.GetUserSetting<bool>(UserSettingConstants.WhenDonePerformActionImmediately))
             {
-                // Do something whent he encode ends.
-                switch (this.userSettingService.GetUserSetting<string>(UserSettingConstants.WhenCompleteAction))
+                ICountdownAlertViewModel titleSpecificView = IoC.Get<ICountdownAlertViewModel>();
+                Execute.OnUIThread(
+                    () =>
+                    {
+                        titleSpecificView.SetAction((WhenDone)this.userSettingService.GetUserSetting<int>(UserSettingConstants.WhenCompleteAction));
+                        this.windowManager.ShowDialog(titleSpecificView);
+                        isCancelled = titleSpecificView.IsCancelled;
+                    });
+            }
+
+            if (!isCancelled)
+            {
+                this.ServiceLogMessage(string.Format("Performing 'When Done' Action: {0}", this.userSettingService.GetUserSetting<int>(UserSettingConstants.WhenCompleteAction)));
+
+                // Do something when the encode ends.
+                switch ((WhenDone)this.userSettingService.GetUserSetting<int>(UserSettingConstants.WhenCompleteAction))
                 {
-                    case "Shutdown":
-                        Process.Start("Shutdown", "-s -t 60");
+                    case WhenDone.Shutdown:
+                        ProcessStartInfo shutdown = new ProcessStartInfo("Shutdown", "-s -t 60");
+                        shutdown.UseShellExecute = false;
+                        Process.Start(shutdown);
+                        Execute.OnUIThread(() => System.Windows.Application.Current.Shutdown());
                         break;
-                    case "Log off":
+                    case WhenDone.LogOff:
+                        this.scanService.Dispose();
                         Win32.ExitWindowsEx(0, 0);
                         break;
-                    case "Suspend":
+                    case WhenDone.Sleep:
                         Application.SetSuspendState(PowerState.Suspend, true, true);
                         break;
-                    case "Hibernate":
+                    case WhenDone.Hibernate:
                         Application.SetSuspendState(PowerState.Hibernate, true, true);
                         break;
-                    case "Lock System":
+                    case WhenDone.LockSystem:
                         Win32.LockWorkStation();
                         break;
-                    case "Quit HandBrake":
+                    case WhenDone.QuickHandBrake:
                         Execute.OnUIThread(() => System.Windows.Application.Current.Shutdown());
                         break;
                 }
             }
+
+            // Allow the system to sleep again.
+            Execute.OnUIThread(() =>
+            {
+                if (this.userSettingService.GetUserSetting<bool>(UserSettingConstants.PreventSleep))
+                {
+                    Win32.AllowSleep();
+                }
+            });
         }
 
-        /// <summary>
-        /// Send a file to a 3rd party application after encoding has completed.
-        /// </summary>
-        /// <param name="file">
-        /// The file path
-        /// </param>
-        private void SendToApplication(string file)
+        private void SendToApplication(string source, string destination)
         {
             if (this.userSettingService.GetUserSetting<bool>(UserSettingConstants.SendFile) &&
                 !string.IsNullOrEmpty(this.userSettingService.GetUserSetting<string>(UserSettingConstants.SendFileTo)))
             {
-                string args = string.Format(
-                    "{0} \"{1}\"", 
-                    this.userSettingService.GetUserSetting<string>(UserSettingConstants.SendFileToArgs), 
-                    file);
-                var vlc =
-                    new ProcessStartInfo(
-                        this.userSettingService.GetUserSetting<string>(UserSettingConstants.SendFileTo), args);
-                Process.Start(vlc);
+                string arguments = this.userSettingService.GetUserSetting<string>(UserSettingConstants.SendFileToArgs);
+
+                arguments = arguments.Replace("{source}", string.Format("\"{0}\"", source));
+                arguments = arguments.Replace("{destination}", string.Format("\"{0}\"", destination));
+
+                var process = new ProcessStartInfo(this.userSettingService.GetUserSetting<string>(UserSettingConstants.SendFileTo), arguments);
+
+                this.ServiceLogMessage(string.Format("Sending output file to: {0}, with arguments: {1} ", destination, arguments));
+
+                Process.Start(process);
             }
         }
 
@@ -209,11 +208,22 @@ namespace HandBrakeWPF.Services
             string filePath = this.userSettingService.GetUserSetting<string>(UserSettingConstants.WhenDoneAudioFile);
             if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
             {
+                this.ServiceLogMessage("Playing Sound: " + filePath);
                 var uri = new Uri(filePath, UriKind.RelativeOrAbsolute);
                 var player = new MediaPlayer();
+                player.MediaFailed += (object sender, ExceptionEventArgs e) => { this.ServiceLogMessage(e?.ToString()); };
                 player.Open(uri);
                 player.Play();
             }
+            else
+            {
+                this.ServiceLogMessage("Unable to play sound. Reason: File not found!");
+            }
+        }
+
+        private void ServiceLogMessage(string message)
+        {
+            this.log.LogMessage(string.Format("# {1}{0}", Environment.NewLine, message));
         }
     }
 }

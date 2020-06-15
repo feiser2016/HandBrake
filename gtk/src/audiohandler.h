@@ -1,14 +1,13 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * audiohandler.h
- * Copyright (C) John Stebbins 2008-2018 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2020 <stebbins@stebbins>
  *
  * audiohandler.h is free software.
  *
  * You may redistribute it and/or modify it under the terms of the
- * GNU General Public License, as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option)
- * any later version.
+ * GNU General Public License version 2, as published by the Free Software
+ * Foundation.
  *
  * audiohandler.h is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -33,7 +32,7 @@ GhbValue *ghb_get_audio_list(GhbValue *settings);
 void ghb_sanitize_audio_track_settings(GhbValue *settings);
 const gchar* ghb_get_user_audio_lang(GhbValue *settings, const hb_title_t *title, gint track);
 void ghb_audio_list_refresh_selected(signal_user_data_t *ud);
-gint ghb_select_audio_codec(gint mux, hb_audio_config_t *aconfig, gint acodec, gint fallback_acodec, gint copy_mask);
+gint ghb_select_audio_codec(gint mux, guint32 in_codec, gint acodec, gint fallback_acodec, gint copy_mask);
 int ghb_select_fallback( GhbValue *settings, int acodec );
 int ghb_get_copy_mask(GhbValue *settings);
 void ghb_audio_list_refresh_all(signal_user_data_t *ud);

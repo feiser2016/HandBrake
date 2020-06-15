@@ -4,7 +4,7 @@
  Homepage: <http://handbrake.fr/>.
  It may be used under the terms of the GNU General Public License. */
 
-#import <Foundation/Foundation.h>
+#import <Cocoa/Cocoa.h>
 #import "HBJob.h"
 
 @interface HBJob (UIAdditions)
@@ -12,7 +12,8 @@
 @property (nonatomic, readonly) BOOL mp4OptionsEnabled;
 @property (nonatomic, readonly) BOOL mp4iPodCompatibleEnabled;
 
-@property (nonatomic, readonly) NSArray *angles;
+@property (nonatomic, readonly) NSArray<NSString *> *angles;
+@property (nonatomic, readonly) NSArray<NSString *> *containers;
 
 @property (nonatomic, readonly) NSAttributedString *attributedDescription;
 

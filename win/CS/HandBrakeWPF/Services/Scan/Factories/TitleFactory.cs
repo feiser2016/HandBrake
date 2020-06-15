@@ -1,5 +1,5 @@
 ﻿// --------------------------------------------------------------------------------------------------------------------
-// <copyright file="TitleFactory.cs" company="">
+// <copyright file="TitleFactory.cs" company="HandBrake Project (http://handbrake.fr)">
 //   This file is part of the HandBrake source code - It may be used under the terms of the GNU General Public License.
 // </copyright>
 // <summary>
@@ -11,11 +11,16 @@ namespace HandBrakeWPF.Services.Scan.Factories
 {
     using System;
 
+    using Caliburn.Micro;
+
     using HandBrake.Interop.Interop.HbLib;
+    using HandBrake.Interop.Interop.HbLib.Wrappers.Interfaces;
     using HandBrake.Interop.Interop.Json.Scan;
     using HandBrake.Interop.Interop.Model;
+    using HandBrake.Interop.Interop.Providers.Interfaces;
 
     using HandBrakeWPF.Services.Encode.Model.Models;
+    using HandBrakeWPF.Services.Interfaces;
     using HandBrakeWPF.Services.Scan.Model;
 
     public class TitleFactory
@@ -56,7 +61,7 @@ namespace HandBrakeWPF.Services.Scan.Factories
             int currentAudioTrack = 1;
             foreach (SourceAudioTrack track in title.AudioList)
             {
-                converted.AudioTracks.Add(new Audio(currentAudioTrack, track.Language, track.LanguageCode, track.Description, track.Codec, track.SampleRate, track.BitRate, track.ChannelLayout));
+                converted.AudioTracks.Add(new Audio(currentAudioTrack, track.Language, track.LanguageCode, track.Description, track.Codec, track.SampleRate, track.BitRate, track.ChannelLayout, track.Name));
                 currentAudioTrack++;
             }
 
@@ -67,36 +72,37 @@ namespace HandBrakeWPF.Services.Scan.Factories
 
                 switch (track.Source)
                 {
-                    case 0:
+                    case (int)hb_subtitle_s_subsource.VOBSUB:
                         convertedType = SubtitleType.VobSub;
                         break;
-                    case 4:
-                        convertedType = SubtitleType.UTF8Sub;
+                    case (int)hb_subtitle_s_subsource.CC608SUB:
+                    case (int)hb_subtitle_s_subsource.CC708SUB:
+                        convertedType = SubtitleType.CC;
                         break;
-                    case 5:
-                        convertedType = SubtitleType.TX3G;
-                        break;
-                    case 6:
-                        convertedType = SubtitleType.SSA;
-                        break;
-                    case 1:
+                    case (int)hb_subtitle_s_subsource.IMPORTSRT:
                         convertedType = SubtitleType.SRT;
                         break;
-                    case 2:
-                        convertedType = SubtitleType.CC;
+                    case (int)hb_subtitle_s_subsource.UTF8SUB:
+                        convertedType = SubtitleType.UTF8Sub;
                         break;
-                    case 3:
-                        convertedType = SubtitleType.CC;
+                    case (int)hb_subtitle_s_subsource.TX3GSUB:
+                        convertedType = SubtitleType.TX3G;
                         break;
-                    case 7:
+                    case (int)hb_subtitle_s_subsource.SSASUB:
+                        convertedType = SubtitleType.SSA;
+                        break;
+                    case (int)hb_subtitle_s_subsource.PGSSUB:
                         convertedType = SubtitleType.PGS;
                         break;
                 }
 
-                bool canBurn = HBFunctions.hb_subtitle_can_burn(track.Source) > 0;
-                bool canSetForcedOnly = HBFunctions.hb_subtitle_can_force(track.Source) > 0;
+                IHbFunctionsProvider provider = IoC.Get<IHbFunctionsProvider>(); // TODO remove IoC call
+                IHbFunctions hbFunctions = provider.GetHbFunctionsWrapper();
 
-                converted.Subtitles.Add(new Subtitle(track.Source, currentSubtitleTrack, track.Language, track.LanguageCode, convertedType, canBurn, canSetForcedOnly));
+                bool canBurn = hbFunctions.hb_subtitle_can_burn(track.Source) > 0;
+                bool canSetForcedOnly = hbFunctions.hb_subtitle_can_force(track.Source) > 0;
+
+                converted.Subtitles.Add(new Subtitle(track.Source, currentSubtitleTrack, track.Language, track.LanguageCode, convertedType, canBurn, canSetForcedOnly, track.Name));
                 currentSubtitleTrack++;
             }
 

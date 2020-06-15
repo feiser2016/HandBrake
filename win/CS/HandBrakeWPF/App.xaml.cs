@@ -11,14 +11,20 @@ namespace HandBrakeWPF
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
+    using System.Threading;
     using System.Windows;
     using System.Windows.Controls;
 
     using Caliburn.Micro;
 
+    using HandBrake.Interop.Interop;
+
     using HandBrakeWPF.Helpers;
+    using HandBrakeWPF.Instance;
+    using HandBrakeWPF.Model;
     using HandBrakeWPF.Services.Interfaces;
     using HandBrakeWPF.Startup;
     using HandBrakeWPF.Utilities;
@@ -94,9 +100,55 @@ namespace HandBrakeWPF
             // Portable Mode
             if (Portable.IsPortable())
             {
-                Portable.Initialise();
+                if (!Portable.Initialise())
+                {
+                    Application.Current.Shutdown();
+                    return;
+                }
             }
 
+            // Setup the UI Language
+            IUserSettingService userSettingService = IoC.Get<IUserSettingService>();
+            string culture = userSettingService.GetUserSetting<string>(UserSettingConstants.UiLanguage);
+            if (!string.IsNullOrEmpty(culture))
+            {
+                InterfaceLanguage language = InterfaceLanguageUtilities.FindInterfaceLanguage(culture);
+                if (language != null)
+                {
+                    CultureInfo ci = new CultureInfo(language.Culture);
+                    Thread.CurrentThread.CurrentUICulture = ci;
+                }
+            }
+
+            bool useDarkTheme = userSettingService.GetUserSetting<bool>(UserSettingConstants.UseDarkTheme);
+            if (useDarkTheme && SystemInfo.IsWindows10())
+            {
+                ResourceDictionary darkTheme = new ResourceDictionary();
+                darkTheme.Source = new Uri("Themes/Dark.xaml", UriKind.Relative);
+                Application.Current.Resources.MergedDictionaries.Add(darkTheme);
+            }
+
+            // NO-Hardware Mode
+            bool noHardware = e.Args.Any(f => f.Equals("--no-hardware")) || (Portable.IsPortable() && !Portable.IsHardwareEnabled());
+
+            // Initialise the Engine
+            HandBrakeWPF.Helpers.LogManager.Init();
+
+            try
+            {
+                HandBrakeInstanceManager.Init(noHardware);
+            }
+            catch (Exception exception)
+            {
+                if (!noHardware)
+                {
+                    MessageBox.Show(HandBrakeWPF.Properties.Resources.Startup_InitFailed, HandBrakeWPF.Properties.Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+
+                throw exception;
+            }
+
+            // Initialise the GUI
             base.OnStartup(e);
 
             // If we have a file dropped on the icon, try scanning it.
@@ -122,7 +174,7 @@ namespace HandBrakeWPF
             Caliburn.Micro.Execute.OnUIThreadAsync(() => {
                 if (e.ExceptionObject.GetType() == typeof(FileNotFoundException))
                 {
-                    GeneralApplicationException exception = new GeneralApplicationException("A file appears to be missing.", "Try re-installing Microsoft .NET Framework 4.0", (Exception)e.ExceptionObject);
+                    GeneralApplicationException exception = new GeneralApplicationException("A file appears to be missing.", "Try re-installing Microsoft .NET Framework 4.8", (Exception)e.ExceptionObject);
                     this.ShowError(exception);
                 }
                 else
@@ -146,7 +198,7 @@ namespace HandBrakeWPF
         {
             if (e.Exception.GetType() == typeof(FileNotFoundException))
             {
-                GeneralApplicationException exception = new GeneralApplicationException("A file appears to be missing.", "Try re-installing Microsoft .NET Framework 4.0", e.Exception);
+                GeneralApplicationException exception = new GeneralApplicationException("A file appears to be missing.", "Try re-installing Microsoft .NET Framework 4.7.1", e.Exception);
                 this.ShowError(exception);
             }
             else if (e.Exception.GetType() == typeof(GeneralApplicationException))

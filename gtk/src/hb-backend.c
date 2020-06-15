@@ -1,13 +1,12 @@
 /*
  * hb-backend.c
- * Copyright (C) John Stebbins 2008-2018 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2020 <stebbins@stebbins>
  *
  * hb-backend.c is free software.
  *
  * You may redistribute it and/or modify it under the terms of the
- * GNU General Public License, as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option)
- * any later version.
+ * GNU General Public License version 2, as published by the Free Software
+ * Foundation.
  *
  * hb-backend.c is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -25,21 +24,21 @@
 #include <limits.h>
 #include <ctype.h>
 #include <math.h>
-#include "hb.h"
+#include "handbrake/handbrake.h"
 #include "ghbcompat.h"
 #include <glib/gstdio.h>
 #include <glib/gi18n.h>
 #include "hb-backend.h"
 #include "settings.h"
+#include "jobdict.h"
 #include "callbacks.h"
 #include "subtitlehandler.h"
 #include "audiohandler.h"
 #include "videohandler.h"
-#include "x264handler.h"
 #include "preview.h"
 #include "presets.h"
 #include "values.h"
-#include "lang.h"
+#include "handbrake/lang.h"
 #include "jansson.h"
 
 typedef struct
@@ -361,6 +360,18 @@ typedef struct
     gboolean preset;
 } filter_opts_t;
 
+static filter_opts_t deblock_preset_opts =
+{
+    .filter_id = HB_FILTER_DEBLOCK,
+    .preset    = TRUE
+};
+
+static filter_opts_t deblock_tune_opts =
+{
+    .filter_id = HB_FILTER_DEBLOCK,
+    .preset    = FALSE
+};
+
 static filter_opts_t deint_preset_opts =
 {
     .filter_id = HB_FILTER_DECOMB,
@@ -506,6 +517,12 @@ combo_name_map_t combo_name_map[] =
         generic_opt_get
     },
     {
+        "QueueWhenComplete",
+        &when_complete_opts,
+        small_opts_set,
+        generic_opt_get
+    },
+    {
         "PicturePAR",
         &par_opts,
         small_opts_set,
@@ -566,6 +583,18 @@ combo_name_map_t combo_name_map[] =
         filter_opt_get
     },
     {
+        "PictureDeblockPreset",
+        &deblock_preset_opts,
+        filter_opts_set,
+        filter_opt_get
+    },
+    {
+        "PictureDeblockTune",
+        &deblock_tune_opts,
+        filter_opts_set,
+        filter_opt_get
+    },
+    {
         "PictureDenoiseFilter",
         &denoise_opts,
         small_opts_set,
@@ -604,54 +633,6 @@ combo_name_map_t combo_name_map[] =
     {
         "PictureRotate",
         &rotate_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_direct",
-        &direct_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_b_adapt",
-        &badapt_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_bpyramid",
-        &bpyramid_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_weighted_pframes",
-        &weightp_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_me",
-        &me_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_subme",
-        &subme_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_analyse",
-        &analyse_opts,
-        small_opts_set,
-        generic_opt_get
-    },
-    {
-        "x264_trellis",
-        &trellis_opts,
         small_opts_set,
         generic_opt_get
     },
@@ -698,7 +679,7 @@ combo_name_map_t combo_name_map[] =
         NULL
     },
     {
-        "SrtLanguage",
+        "ImportLanguage",
         NULL,
         language_opts_set,
         NULL
@@ -1116,7 +1097,7 @@ ghb_subtitle_track_source(GhbValue *settings, gint track)
     const hb_title_t *title;
 
     if (track == -2)
-        return SRTSUB;
+        return IMPORTSRT;
     if (track < 0)
         return VOBSUB;
     title_id = ghb_dict_get_int(settings, "title");
@@ -1248,8 +1229,6 @@ ghb_grey_combo_options(signal_user_data_t *ud)
     mux_id = ghb_dict_get_string(ud->settings, "FileFormat");
     mux = ghb_lookup_container_by_name(mux_id);
 
-    grey_builder_combo_box_item(ud->builder, "x264_analyse", 4, TRUE);
-
     const hb_encoder_t *enc;
     for (enc = hb_audio_encoder_get_next(NULL); enc != NULL;
          enc = hb_audio_encoder_get_next(enc))
@@ -1288,19 +1267,17 @@ ghb_grey_combo_options(signal_user_data_t *ud)
     acodec = ghb_settings_audio_encoder_codec(ud->settings, "AudioEncoder");
 
     gint64 layout = aconfig != NULL ? aconfig->in.channel_layout : ~0;
+    guint32 in_codec = aconfig != NULL ? aconfig->in.codec : 0;
     fallback = ghb_select_fallback(ud->settings, acodec);
     gint copy_mask = ghb_get_copy_mask(ud->settings);
-    acodec = ghb_select_audio_codec(mux->format, aconfig, acodec,
+    acodec = ghb_select_audio_codec(mux->format, in_codec, acodec,
                                     fallback, copy_mask);
     grey_mix_opts(ud, acodec, layout);
 }
 
 gint
-ghb_get_best_mix(hb_audio_config_t *aconfig, gint acodec, gint mix)
+ghb_get_best_mix(uint64_t layout, gint acodec, gint mix)
 {
-    gint layout;
-    layout = aconfig ? aconfig->in.channel_layout : AV_CH_LAYOUT_5POINT1;
-
     if (mix == HB_AMIXDOWN_NONE)
         mix = HB_INVALID_AMIXDOWN;
 
@@ -2022,31 +1999,36 @@ language_opts_set(signal_user_data_t *ud, const gchar *name,
     (void)data; // Silence "unused variable" warning
     GtkTreeIter iter;
     GtkListStore *store;
-    gint ii;
 
     GtkComboBox *combo = GTK_COMBO_BOX(GHB_WIDGET(ud->builder, name));
     store = GTK_LIST_STORE(gtk_combo_box_get_model (combo));
     gtk_list_store_clear(store);
     const iso639_lang_t *iso639;
-    for (iso639 = lang_get_next(NULL), ii = 0; iso639 != NULL;
-         iso639 = lang_get_next(iso639), ii++)
+    for (iso639 = lang_get_next(NULL); iso639 != NULL;
+         iso639 = lang_get_next(iso639))
     {
-        const gchar *lang;
+        int     index = lang_lookup_index(iso639->iso639_1);
+        gchar * lang;
 
         if (iso639->native_name[0] != 0)
-            lang = iso639->native_name;
+            lang = g_strdup_printf("%s", iso639->native_name);
         else
-            lang = iso639->eng_name;
+            lang = g_strdup_printf("%s", iso639->eng_name);
 
         gtk_list_store_append(store, &iter);
         gtk_list_store_set(store, &iter,
                            0, lang,
                            1, TRUE,
                            2, iso639->iso639_2,
-                           3, (gdouble)ii,
+                           3, (gdouble)index,
                            -1);
+        g_free(lang);
     }
+#if !GTK_CHECK_VERSION(3, 90, 0)
+    // This is handled by GtkEventControllerKey in gtk4
+    // Initialized in ghb_combo_init()
     g_signal_connect(combo, "key-press-event", combo_search_key_press_cb, ud);
+#endif
 }
 
 static void
@@ -2444,16 +2426,20 @@ video_tune_opts_set(signal_user_data_t *ud, const gchar *name,
 
     for (ii = 0; ii < count; ii++)
     {
-        if (strcmp(tunes[ii], "fastdecode") && strcmp(tunes[ii], "zerolatency"))
+        if (((encoder & HB_VCODEC_X264_MASK) &&
+             !strcmp(tunes[ii], "fastdecode")) ||
+            ((encoder & (HB_VCODEC_X264_MASK | HB_VCODEC_X265_MASK)) &&
+             !strcmp(tunes[ii], "zerolatency")))
         {
-            gtk_list_store_append(store, &iter);
-            gtk_list_store_set(store, &iter,
-                               0, tunes[ii],
-                               1, TRUE,
-                               2, tunes[ii],
-                               3, (gdouble)ii + 1,
-                               -1);
+            continue;
         }
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter,
+                           0, tunes[ii],
+                           1, TRUE,
+                           2, tunes[ii],
+                           3, (gdouble)ii + 1,
+                           -1);
     }
 }
 
@@ -3063,22 +3049,17 @@ void ghb_init_lang_list(GtkTreeView *tv, signal_user_data_t *ud)
 {
     GtkTreeIter    iter;
     GtkTreeStore * ts;
-    int            ii;
 
     ghb_init_lang_list_model(tv);
     ts = GTK_TREE_STORE(gtk_tree_view_get_model(tv));
 
     const iso639_lang_t *iso639;
-    for (iso639 = lang_get_next(NULL), ii = 0; iso639 != NULL;
-         iso639 = lang_get_next(iso639), ii++)
+    for (iso639 = lang_get_any(); iso639 != NULL;
+         iso639 = lang_get_next(iso639))
     {
+        int          index = lang_lookup_index(iso639->iso639_2);
         const char * lang;
-        if (ii == 0)
-        {
-            lang = _("Any");
-        }
-        else if (iso639->native_name != NULL &&
-                 iso639->native_name[0] != 0)
+        if (iso639->native_name != NULL && iso639->native_name[0] != 0)
         {
             lang = iso639->native_name;
         }
@@ -3087,7 +3068,7 @@ void ghb_init_lang_list(GtkTreeView *tv, signal_user_data_t *ud)
             lang = iso639->eng_name;
         }
         gtk_tree_store_append(ts, &iter, NULL);
-        gtk_tree_store_set(ts, &iter, 0, lang, 1, ii, -1);
+        gtk_tree_store_set(ts, &iter, 0, lang, 1, index, -1);
     }
 }
 
@@ -3155,44 +3136,23 @@ init_ui_combo_boxes(GtkBuilder *builder)
     }
 }
 
-// Construct the advanced options string
-// The result is allocated, so someone must free it at some point.
-const gchar*
-ghb_build_advanced_opts_string(GhbValue *settings)
-{
-    gint vcodec;
-    vcodec = ghb_settings_video_encoder_codec(settings, "VideoEncoder");
-    switch (vcodec)
-    {
-        case HB_VCODEC_X264_8BIT:
-        case HB_VCODEC_X264_10BIT:
-            return ghb_dict_get_string(settings, "x264Option");
-
-        default:
-            return NULL;
-    }
-}
-
-void
-ghb_part_duration(const hb_title_t *title, gint sc, gint ec, gint *hh, gint *mm, gint *ss)
+gint64
+ghb_chapter_range_get_duration(const hb_title_t *title, gint sc, gint ec)
 {
     hb_chapter_t * chapter;
     gint count, c;
     gint64 duration;
 
-    *hh = *mm = *ss = 0;
-    if (title == NULL) return;
+    if (title == NULL) return 0;
 
-    *hh = title->hours;
-    *mm = title->minutes;
-    *ss = title->seconds;
+    duration = title->duration;
 
     count = hb_list_count(title->list_chapter);
     if (sc > count) sc = count;
     if (ec > count) ec = count;
 
     if (sc == 1 && ec == count)
-        return;
+        return duration;
 
     duration = 0;
     for (c = sc; c <= ec; c++)
@@ -3200,10 +3160,7 @@ ghb_part_duration(const hb_title_t *title, gint sc, gint ec, gint *hh, gint *mm,
         chapter = hb_list_item(title->list_chapter, c-1);
         duration += chapter->duration;
     }
-
-    *hh =   duration / 90000 / 3600;
-    *mm = ((duration / 90000) % 3600) / 60;
-    *ss =  (duration / 90000) % 60;
+    return duration;
 }
 
 gint64
@@ -3377,6 +3334,19 @@ ghb_combo_init(signal_user_data_t *ud)
     init_ui_combo_boxes(ud->builder);
     // Populate all the combos
     ghb_update_ui_combo_box(ud, NULL, NULL, TRUE);
+
+#if GTK_CHECK_VERSION(3, 90, 0)
+    GtkWidget          * combo;
+    GtkEventController * econ;
+
+    // Set key-press handler for subtitle import language combo.
+    // Pressing a key warps to the next language that starts with that key.
+    combo = GHB_WIDGET(ud->builder, "ImportLanguage");
+    econ  = gtk_event_controller_key_new();
+    gtk_widget_add_controller(combo, econ);
+    g_signal_connect(econ, "key-pressed",
+                     G_CALLBACK(combo_search_key_press_cb), ud);
+#endif
 }
 
 void
@@ -3487,6 +3457,8 @@ ghb_get_status(ghb_status_t *status)
 static void
 update_status(hb_state_t *state, ghb_instance_status_t *status)
 {
+    status->unique_id   = state->sequence_id;
+
 #define p state->param.scanning
     if (state->state & HB_STATE_SCANNING)
     {
@@ -3499,6 +3471,7 @@ update_status(hb_state_t *state, ghb_instance_status_t *status)
     }
     else
     {
+        // If last state seen was scanning, signal that scan id complete
         if (status->state & GHB_STATE_SCANNING)
         {
             status->state |= GHB_STATE_SCANDONE;
@@ -3507,83 +3480,72 @@ update_status(hb_state_t *state, ghb_instance_status_t *status)
     }
 #undef p
 #define p state->param.working
-    if (state->state & HB_STATE_WORKING)
+    if (state->state & (HB_STATE_WORKING | HB_STATE_WORKDONE |
+                        HB_STATE_SEARCHING))
     {
-        if (status->state & GHB_STATE_SCANNING)
+        status->pass        = p.pass;
+        status->pass_count  = p.pass_count;
+        status->pass_id     = p.pass_id;
+        status->progress    = p.progress;
+        status->rate_cur    = p.rate_cur;
+        status->rate_avg    = p.rate_avg;
+        status->eta_seconds = p.eta_seconds;
+        status->hours       = p.hours;
+        status->minutes     = p.minutes;
+        status->seconds     = p.seconds;
+        status->paused      = p.paused;
+
+        if (state->state & HB_STATE_WORKING)
         {
-            status->state &= ~GHB_STATE_SCANNING;
-            status->state |= GHB_STATE_SCANDONE;
+            status->state |= GHB_STATE_WORKING;
+            status->state &= ~GHB_STATE_PAUSED;
+            status->state &= ~GHB_STATE_SEARCHING;
         }
-        status->state |= GHB_STATE_WORKING;
-        status->state &= ~GHB_STATE_PAUSED;
-        status->state &= ~GHB_STATE_SEARCHING;
-        status->pass = p.pass;
-        status->pass_count = p.pass_count;
-        status->pass_id = p.pass_id;
-        status->progress = p.progress;
-        status->rate_cur = p.rate_cur;
-        status->rate_avg = p.rate_avg;
-        status->hours = p.hours;
-        status->minutes = p.minutes;
-        status->seconds = p.seconds;
-        status->unique_id = p.sequence_id;
-    }
-    else
-    {
-        status->state &= ~GHB_STATE_WORKING;
-    }
-    if (state->state & HB_STATE_SEARCHING)
-    {
-        status->state |= GHB_STATE_SEARCHING;
-        status->state &= ~GHB_STATE_WORKING;
-        status->state &= ~GHB_STATE_PAUSED;
-        status->pass = p.pass;
-        status->pass_count = p.pass_count;
-        status->pass_id = p.pass_id;
-        status->progress = p.progress;
-        status->rate_cur = p.rate_cur;
-        status->rate_avg = p.rate_avg;
-        status->hours = p.hours;
-        status->minutes = p.minutes;
-        status->seconds = p.seconds;
-        status->unique_id = p.sequence_id;
-    }
-    else
-    {
-        status->state &= ~GHB_STATE_SEARCHING;
-    }
-#undef p
-#define p state->param.working
-    if (state->state & HB_STATE_WORKDONE)
-    {
-        status->state |= GHB_STATE_WORKDONE;
-        status->state &= ~GHB_STATE_MUXING;
-        status->state &= ~GHB_STATE_PAUSED;
-        status->state &= ~GHB_STATE_WORKING;
-        status->state &= ~GHB_STATE_SEARCHING;
-        status->unique_id = p.sequence_id;
-        switch (p.error)
+        else
         {
-        case HB_ERROR_NONE:
-            status->error = GHB_ERROR_NONE;
-            break;
-        case HB_ERROR_CANCELED:
-            status->error = GHB_ERROR_CANCELED;
-            break;
-        default:
-            status->error = GHB_ERROR_FAIL;
-            break;
+            status->state &= ~GHB_STATE_WORKING;
+        }
+        if (state->state & HB_STATE_SEARCHING)
+        {
+            status->state |= GHB_STATE_SEARCHING;
+            status->state &= ~GHB_STATE_WORKING;
+            status->state &= ~GHB_STATE_PAUSED;
+        }
+        else
+        {
+            status->state &= ~GHB_STATE_SEARCHING;
+        }
+        if (state->state & HB_STATE_WORKDONE)
+        {
+            status->state |= GHB_STATE_WORKDONE;
+            status->state &= ~GHB_STATE_MUXING;
+            status->state &= ~GHB_STATE_PAUSED;
+            status->state &= ~GHB_STATE_WORKING;
+            status->state &= ~GHB_STATE_SEARCHING;
+            switch (p.error)
+            {
+            case HB_ERROR_NONE:
+                status->error = GHB_ERROR_NONE;
+                break;
+            case HB_ERROR_CANCELED:
+                status->error = GHB_ERROR_CANCELED;
+                break;
+            default:
+                status->error = GHB_ERROR_FAIL;
+                break;
+            }
         }
     }
-#undef p
     if (state->state & HB_STATE_PAUSED)
     {
+        status->paused      = p.paused;
         status->state |= GHB_STATE_PAUSED;
     }
     else
     {
         status->state &= ~GHB_STATE_PAUSED;
     }
+#undef p
     if (state->state & HB_STATE_MUXING)
     {
         status->state |= GHB_STATE_MUXING;
@@ -4367,6 +4329,8 @@ ghb_validate_video(GhbValue *settings, GtkWindow *parent)
     mux_id = ghb_dict_get_string(settings, "FileFormat");
     mux = ghb_lookup_container_by_name(mux_id);
 
+    gboolean v_unsup = FALSE;
+
     vcodec = ghb_settings_video_encoder_codec(settings, "VideoEncoder");
     if ((mux->format & HB_MUX_MASK_MP4) && (vcodec == HB_VCODEC_THEORA))
     {
@@ -4375,6 +4339,21 @@ ghb_validate_video(GhbValue *settings, GtkWindow *parent)
                     _("Theora is not supported in the MP4 container.\n\n"
                     "You should choose a different video codec or container.\n"
                     "If you continue, FFMPEG will be chosen for you."));
+        v_unsup = TRUE;
+    }
+    else if ((mux->format & HB_MUX_MASK_WEBM) &&
+             (vcodec != HB_VCODEC_FFMPEG_VP8 && vcodec != HB_VCODEC_FFMPEG_VP9))
+    {
+        // webm only supports vp8 and vp9.
+        message = g_strdup_printf(
+                    _("Only VP8 or VP9 is supported in the WebM container.\n\n"
+                    "You should choose a different video codec or container.\n"
+                    "If you continue, one will be chosen for you."));
+        v_unsup = TRUE;
+    }
+
+    if (v_unsup)
+    {
         if (!ghb_message_dialog(parent, GTK_MESSAGE_WARNING,
                                 message, _("Cancel"), _("Continue")))
         {
@@ -4386,6 +4365,7 @@ ghb_validate_video(GhbValue *settings, GtkWindow *parent)
         ghb_dict_set_string(settings, "VideoEncoder",
                                 hb_video_encoder_get_short_name(vcodec));
     }
+
     return TRUE;
 }
 
@@ -4405,9 +4385,15 @@ ghb_validate_subtitles(GhbValue *settings, GtkWindow *parent)
         return FALSE;
     }
 
-    const GhbValue *slist, *subtitle, *srt;
+    const GhbValue *slist, *subtitle, *import;
     gint count, ii, track;
     gboolean burned, one_burned = FALSE;
+
+    const char *mux_id;
+    const hb_container_t *mux;
+
+    mux_id = ghb_dict_get_string(settings, "FileFormat");
+    mux = ghb_lookup_container_by_name(mux_id);
 
     slist = ghb_get_job_subtitle_list(settings);
     count = ghb_array_len(slist);
@@ -4415,7 +4401,7 @@ ghb_validate_subtitles(GhbValue *settings, GtkWindow *parent)
     {
         subtitle = ghb_array_get(slist, ii);
         track = ghb_dict_get_int(subtitle, "Track");
-        srt = ghb_dict_get(subtitle, "SRT");
+        import = ghb_dict_get(subtitle, "Import");
         burned = track != -1 && ghb_dict_get_bool(subtitle, "Burn");
         if (burned && one_burned)
         {
@@ -4438,11 +4424,27 @@ ghb_validate_subtitles(GhbValue *settings, GtkWindow *parent)
         {
             one_burned = TRUE;
         }
-        if (srt != NULL)
+        else if (mux->format & HB_MUX_MASK_WEBM)
+        {
+            // WebM can only handle burned subs afaik. Their specs are ambiguous here
+            message = g_strdup_printf(
+            _("WebM in HandBrake only supports burned subtitles.\n\n"
+                "You should change your subtitle selections.\n"
+                "If you continue, some subtitles will be lost."));
+            if (!ghb_message_dialog(parent, GTK_MESSAGE_WARNING,
+                                    message, _("Cancel"), _("Continue")))
+            {
+                g_free(message);
+                return FALSE;
+            }
+            g_free(message);
+            break;
+        }
+        if (import != NULL)
         {
             const gchar *filename;
 
-            filename = ghb_dict_get_string(srt, "Filename");
+            filename = ghb_dict_get_string(import, "Filename");
             if (!g_file_test(filename, G_FILE_TEST_IS_REGULAR))
             {
                 message = g_strdup_printf(
@@ -4526,6 +4528,10 @@ ghb_validate_audio(GhbValue *settings, GtkWindow *parent)
             {
                 codec = HB_ACODEC_LAME;
             }
+            else if (mux->format & HB_MUX_MASK_WEBM)
+            {
+                codec = hb_audio_encoder_get_default(mux->format);
+            }
             else
             {
                 codec = HB_ACODEC_FFAAC;
@@ -4533,8 +4539,8 @@ ghb_validate_audio(GhbValue *settings, GtkWindow *parent)
             const char *name = hb_audio_encoder_get_short_name(codec);
             ghb_dict_set_string(asettings, "Encoder", name);
         }
-        gchar *a_unsup = NULL;
-        gchar *mux_s = NULL;
+        const gchar *a_unsup = NULL;
+        const gchar *mux_s = NULL;
         if (mux->format & HB_MUX_MASK_MP4)
         {
             mux_s = "MP4";
@@ -4543,6 +4549,16 @@ ghb_validate_audio(GhbValue *settings, GtkWindow *parent)
             {
                 a_unsup = "Vorbis";
                 codec = HB_ACODEC_FFAAC;
+            }
+        }
+        if (mux->format & HB_MUX_MASK_WEBM)
+        {
+            mux_s = "WebM";
+            // WebM only supports Vorbis and Opus codecs
+            if (codec != HB_ACODEC_VORBIS && codec != HB_ACODEC_OPUS)
+            {
+                a_unsup = hb_audio_encoder_get_short_name(codec);
+                codec = hb_audio_encoder_get_default(mux->format);
             }
         }
         if (a_unsup)
@@ -4851,14 +4867,9 @@ ghb_get_preview_image(
     if (ghb_dict_get_bool(ud->prefs, "reduce_hd_preview"))
     {
         gint factor = 80;
-
-        GdkWindow *window;
         gint s_w, s_h;
 
-        window = gtk_widget_get_window(
-                    GHB_WIDGET(ud->builder, "hb_window"));
-        ghb_monitor_get_size(window, &s_w, &s_h);
-
+        ghb_monitor_get_size(GHB_WIDGET(ud->builder, "hb_window"), &s_w, &s_h);
         if (s_w > 0 && s_h > 0 &&
             (previewWidth  > s_w * factor / 100 ||
              previewHeight > s_h * factor / 100))

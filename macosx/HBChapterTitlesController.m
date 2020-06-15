@@ -3,9 +3,9 @@
    This file is part of the HandBrake source code.
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License. */
-   
-#import "HBChapterTitlesController.h"
 
+#import "HBChapterTitlesController.h"
+#import "HBPreferencesKeys.h"
 @import HandBrakeKit;
 
 @interface NSArray (HBCSVAdditions)
@@ -43,7 +43,7 @@
 //     <one>
 //     <John said, "Hello there.">
 //     <three>
-+ (nullable NSArray<NSArray<NSString *> *> *)HB_arrayWithContentsOfCSVURL:(NSURL *)url;
++ (nullable NSArray<NSArray<NSString *> *> *)HB_arrayWithContentsOfCSVURL:(NSURL *)url
 {
     NSString *str = [[NSString alloc] initWithContentsOfURL:url encoding:NSUTF8StringEncoding error:NULL];
 
@@ -157,7 +157,7 @@
 
 @interface HBChapterTitlesController () <NSTableViewDataSource, NSTableViewDelegate>
 
-@property (weak) IBOutlet NSTableView *table;
+@property (nonatomic, weak) IBOutlet NSTableView *table;
 @property (nonatomic, readwrite, strong) NSArray<HBChapter *> *chapterTitles;
 
 @end
@@ -280,7 +280,7 @@
 - (IBAction)browseForChapterFile:(id)sender
 {
     // We get the current file name and path from the destination field here
-    NSURL *sourceDirectory = [[NSUserDefaults standardUserDefaults] URLForKey:@"HBLastDestinationDirectory"];
+    NSURL *sourceDirectory = [NSUserDefaults.standardUserDefaults URLForKey:HBLastDestinationDirectoryURL];
 
 	// Open a panel to let the user choose the file
 	NSOpenPanel *panel = [NSOpenPanel openPanel];
@@ -302,7 +302,7 @@
 
 - (IBAction)browseForChapterFileSave:(id)sender
 {
-    NSURL *destinationDirectory = [[NSUserDefaults standardUserDefaults] URLForKey:@"HBLastDestinationDirectory"];
+    NSURL *destinationDirectory = [NSUserDefaults.standardUserDefaults URLForKey:HBLastDestinationDirectoryURL];
 
     NSSavePanel *panel = [NSSavePanel savePanel];
     panel.allowedFileTypes = @[@"csv"];

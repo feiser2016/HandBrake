@@ -61,6 +61,9 @@ typedef void (^HBCoreCleanupHandler)(void);
 /// Cleanup handle, used for internal HBCore cleanup.
 @property (nonatomic, readwrite, copy) HBCoreCleanupHandler cleanupHandler;
 
+/// Progress
+@property (nonatomic, readwrite) NSProgress *progress;
+
 @end
 
 @implementation HBCore
@@ -93,7 +96,7 @@ typedef void (^HBCoreCleanupHandler)(void);
     return [self initWithLogLevel:0 queue:dispatch_get_main_queue()];
 }
 
-- (instancetype)initWithLogLevel:(int)level queue:(dispatch_queue_t)queue
+- (instancetype)initWithLogLevel:(NSInteger)level queue:(dispatch_queue_t)queue
 {
     self = [super init];
     if (self)
@@ -109,7 +112,7 @@ typedef void (^HBCoreCleanupHandler)(void);
         bzero(_hb_state, sizeof(hb_state_t));
         _logLevel = level;
 
-        _hb_handle = hb_init(level);
+        _hb_handle = hb_init((int)level);
         if (!_hb_handle)
         {
             return nil;
@@ -119,7 +122,7 @@ typedef void (^HBCoreCleanupHandler)(void);
     return self;
 }
 
-- (instancetype)initWithLogLevel:(int)level name:(NSString *)name
+- (instancetype)initWithLogLevel:(NSInteger)level name:(NSString *)name
 {
     self = [self initWithLogLevel:level queue:dispatch_get_main_queue()];
     if (self)
@@ -141,10 +144,10 @@ typedef void (^HBCoreCleanupHandler)(void);
     free(_hb_state);
 }
 
-- (void)setLogLevel:(int)logLevel
+- (void)setLogLevel:(NSInteger)logLevel
 {
     _logLevel = logLevel;
-    hb_log_level_set(_hb_handle, logLevel);
+    hb_log_level_set(_hb_handle, (int)logLevel);
 }
 
 - (void)preventSleep
@@ -182,7 +185,7 @@ typedef void (^HBCoreCleanupHandler)(void);
     NSAssert(url, @"[HBCore canScan:] called with nil url.");
 
 #ifdef __SANDBOX_ENABLED__
-    BOOL accessingSecurityScopedResource = [url startAccessingSecurityScopedResource];
+    __unused HBSecurityAccessToken *token = [HBSecurityAccessToken tokenWithObject:url];
 #endif
 
     if (![[NSFileManager defaultManager] fileExistsAtPath:url.path]) {
@@ -205,10 +208,18 @@ typedef void (^HBCoreCleanupHandler)(void);
         if (detector.isVideoDVD)
         {
             lib = dlopen("libdvdcss.2.dylib", RTLD_LAZY);
+            if (!lib)
+            {
+                lib = dlopen("/usr/local/lib/libdvdcss.2.dylib", RTLD_LAZY);
+            }
         }
         else if (detector.isVideoBluRay)
         {
             lib = dlopen("libaacs.dylib", RTLD_LAZY);
+            if (!lib)
+            {
+                lib = dlopen("/usr/local/lib/libaacs.dylib", RTLD_LAZY);
+            }
         }
 
         if (lib)
@@ -218,6 +229,13 @@ typedef void (^HBCoreCleanupHandler)(void);
         }
         else
         {
+            const char *dlError = dlerror();
+
+            if (dlError)
+            {
+                [HBUtilities writeToActivityLog:"dlopen error: %s", dlError];
+            }
+
             // Notify the user that we don't support removal of copy protection.
             [HBUtilities writeToActivityLog:"%s, library not found for decrypting physical disc", self.name.UTF8String];
 
@@ -230,16 +248,13 @@ typedef void (^HBCoreCleanupHandler)(void);
     }
 
 #ifdef __SANDBOX_ENABLED__
-    if (accessingSecurityScopedResource)
-    {
-        [url stopAccessingSecurityScopedResource];
-    }
+    token = nil;
 #endif
 
     return YES;
 }
 
-- (void)scanURL:(NSURL *)url titleIndex:(NSUInteger)index previews:(NSUInteger)previewsNum minDuration:(NSUInteger)seconds progressHandler:(HBCoreProgressHandler)progressHandler completionHandler:(HBCoreCompletionHandler)completionHandler
+- (void)scanURL:(NSURL *)url titleIndex:(NSUInteger)index previews:(NSUInteger)previewsNum minDuration:(NSUInteger)seconds keepPreviews:(BOOL)keepPreviews progressHandler:(HBCoreProgressHandler)progressHandler completionHandler:(HBCoreCompletionHandler)completionHandler
 {
     NSAssert(self.state == HBStateIdle, @"[HBCore scanURL:] called while another scan or encode already in progress");
     NSAssert(url, @"[HBCore scanURL:] called with nil url.");
@@ -276,7 +291,7 @@ typedef void (^HBCoreCleanupHandler)(void);
 
     hb_scan(_hb_handle, url.fileSystemRepresentation,
             (int)index, (int)previewsNum,
-            1, min_title_duration_ticks);
+            keepPreviews, min_title_duration_ticks);
 
     // Start the timer to handle libhb state changes
     [self startUpdateTimerWithInterval:0.2];
@@ -315,7 +330,7 @@ typedef void (^HBCoreCleanupHandler)(void);
 }
 
 #pragma mark - Preview images
-        
+
 - (CGImageRef)copyImageAtIndex:(NSUInteger)index
                       forTitle:(HBTitle *)title
                   pictureFrame:(HBPicture *)frame
@@ -386,7 +401,7 @@ typedef void (^HBCoreCleanupHandler)(void);
         hb_image_close(&image);
     }
 
-    if (angle || flipped)
+    if (img && (angle || flipped))
     {
         CGImageRef rotatedImg = CGImageRotated(img, angle, flipped);
         CGImageRelease(img);
@@ -405,7 +420,7 @@ typedef void (^HBCoreCleanupHandler)(void);
 
 #pragma mark - Encodes
 
-- (void)encodeJob:(HBJob *)job progressHandler:(HBCoreProgressHandler)progressHandler completionHandler:(HBCoreCompletionHandler)completionHandler;
+- (void)encodeJob:(HBJob *)job progressHandler:(HBCoreProgressHandler)progressHandler completionHandler:(HBCoreCompletionHandler)completionHandler
 {
     NSAssert(self.state == HBStateIdle, @"[HBCore encodeJob:] called while another scan or encode already in progress");
     NSAssert(job, @"[HBCore encodeJob:] called with nil job");
@@ -429,7 +444,7 @@ typedef void (^HBCoreCleanupHandler)(void);
     hb_job_close(&hb_job);
 
     [self preventAutoSleep];
-
+    [self startProgressReporting:job.completeOutputURL];
     hb_start(_hb_handle);
 
     // Start the timer to handle libhb state changes
@@ -446,7 +461,9 @@ typedef void (^HBCoreCleanupHandler)(void);
 
 - (HBCoreResult)workDone
 {
-    // HB_STATE_WORKDONE happpens as a result of libhb finishing all its jobs
+    [self stopProgressReporting];
+
+    // HB_STATE_WORKDONE happens as a result of libhb finishing all its jobs
     // or someone calling hb_stop. In the latter case, hb_stop does not clear
     // out the remaining passes/jobs in the queue. We'll do that here.
     hb_job_t *job;
@@ -492,6 +509,31 @@ typedef void (^HBCoreCleanupHandler)(void);
     hb_resume(_hb_handle);
     self.state = HBStateWorking;
     [self preventAutoSleep];
+}
+
+#pragma mark - Progress
+
+- (void)startProgressReporting:(NSURL *)fileURL
+{
+    if (fileURL)
+    {
+        NSDictionary *userInfo = @{NSProgressFileURLKey : fileURL};
+
+        self.progress = [[NSProgress alloc] initWithParent:nil userInfo:userInfo];
+        self.progress.totalUnitCount = 100;
+        self.progress.kind = NSProgressKindFile;
+        self.progress.pausable = NO;
+        self.progress.cancellable = NO;
+
+        [self.progress publish];
+    }
+}
+
+- (void)stopProgressReporting
+{
+    self.progress.completedUnitCount = 100;
+    [self.progress unpublish];
+    self.progress = nil;
 }
 
 #pragma mark - State updates
@@ -546,7 +588,10 @@ typedef void (^HBCoreCleanupHandler)(void);
     }
 
     // Update HBCore state to reflect the current state of libhb
-    self.state = _hb_state->state;
+    if (_state != _hb_state->state)
+    {
+        self.state = _hb_state->state;
+    }
 
     // Call the handler for the current state
     if (_hb_state->state == HB_STATE_WORKDONE || _hb_state->state == HB_STATE_SCANDONE)
@@ -582,6 +627,12 @@ typedef void (^HBCoreCleanupHandler)(void);
         NSString *info = [self.stateFormatter stateToString:state];
 
         self.progressHandler(self.state, progress, info);
+
+        if (state.state != HB_STATE_SEARCHING &&
+            self.progress.completedUnitCount < progress.percent * 100)
+        {
+            self.progress.completedUnitCount = progress.percent * 100;
+        }
     }
 }
 

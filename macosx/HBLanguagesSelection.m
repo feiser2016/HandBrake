@@ -5,7 +5,7 @@
  It may be used under the terms of the GNU General Public License. */
 
 #import "HBLanguagesSelection.h"
-#include "lang.h"
+#include "handbrake/lang.h"
 
 @implementation HBLang
 
@@ -68,10 +68,23 @@
         NSMutableArray<HBLang *> *internal = [[NSMutableArray alloc] init];
         NSMutableArray<HBLang *> *selected = [[NSMutableArray alloc] init];
 
-        const iso639_lang_t *lang = lang_get_next(NULL);
-        for (lang = lang_get_next(lang); lang != NULL; lang = lang_get_next(lang))
+        const iso639_lang_t *lang;
+        for (lang = lang_get_any(); lang != NULL; lang = lang_get_next(lang))
         {
-            NSString *nativeLanguage = strlen(lang->native_name) ? @(lang->native_name) : @(lang->eng_name);
+            NSString *nativeLanguage;
+
+            if (!strncmp(lang->iso639_2, "any", 3))
+            {
+                nativeLanguage = NSLocalizedString(@"Any", @"HBLanguage -> Any language");
+            }
+            else if (!strncmp(lang->iso639_2, "und", 3))
+            {
+                nativeLanguage = NSLocalizedString(@"Unknown", @"HBLanguage -> Unknown language");
+            }
+            else
+            {
+                nativeLanguage = strlen(lang->native_name) ? @(lang->native_name) : @(lang->eng_name);
+            }
 
             HBLang *item = [[HBLang alloc] initWithLanguage:nativeLanguage
                                                 iso639_2code:@(lang->iso639_2)];
@@ -84,17 +97,7 @@
             {
                 [internal addObject:item];
             }
-            
         }
-
-        // Add the (Any) item.
-        HBLang *item = [[HBLang alloc] initWithLanguage:NSLocalizedString(@"(Any)", @"Language selection")
-                                            iso639_2code:@"und"];
-        if ([languages containsObject:item.iso639_2])
-        {
-            item.isSelected = YES;
-        }
-        [internal insertObject:item atIndex:0];
 
         // Insert the selected items
         // in the original order.
@@ -207,7 +210,7 @@ NSString *kHBLanguagesDragRowsType = @"kHBLanguagesDragRowsType";
         [pboard declareTypes:@[kHBLanguagesDragRowsType] owner:self];
         [pboard setData:data forType:kHBLanguagesDragRowsType];
     }
-    
+
     return self.isDragginEnabled;
 }
 
@@ -245,7 +248,7 @@ NSString *kHBLanguagesDragRowsType = @"kHBLanguagesDragRowsType";
 
         NSUInteger i = [indexSet countOfIndexesInRange:NSMakeRange(0, row)];
 
-        // Rearrage the objects.
+        // Rearrange the objects.
         [self moveObjectsInArrangedObjectsFromIndexes:indexSet toIndex:row];
 
         // Update the selection.

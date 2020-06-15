@@ -19,7 +19,7 @@
 #import "HBSubtitles.h"
 #import "HBChapter.h"
 
-#import "HBDistributedArray.h"
+#import "HBSecurityAccessToken.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -27,27 +27,13 @@ extern NSString *HBContainerChangedNotification;
 extern NSString *HBChaptersChangedNotification;
 
 /**
- *  A flag to indicate the job's state
- */
-typedef NS_ENUM(NSUInteger, HBJobState){
-    HBJobStateReady,
-    HBJobStateWorking,
-    HBJobStateCompleted,
-    HBJobStateCanceled, 
-    HBJobStateFailed
-};
-
-/**
  * HBJob
  */
-@interface HBJob : NSObject <NSSecureCoding, NSCopying, HBPresetCoding, HBUniqueObject>
+@interface HBJob : NSObject <NSSecureCoding, NSCopying, HBPresetCoding, HBSecurityScope>
 
 - (instancetype)initWithTitle:(HBTitle *)title andPreset:(HBPreset *)preset;
 
 - (void)applyPreset:(HBPreset *)preset;
-
-/// Current state of the job.
-@property (nonatomic, readwrite) HBJobState state;
 
 @property (nonatomic, readwrite, weak, nullable) HBTitle *title;
 @property (nonatomic, readonly) int titleIdx;

@@ -1,22 +1,22 @@
 /* hb.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
-#include "hbffmpeg.h"
-#include "encx264.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/hbffmpeg.h"
+#include "handbrake/encx264.h"
 #include "libavfilter/avfilter.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#ifdef USE_QSV
-#include "qsv_common.h"
+#if HB_PROJECT_FEATURE_QSV
+#include "handbrake/qsv_common.h"
 #endif
 
 #if defined( SYS_MINGW )
@@ -54,6 +54,8 @@ struct hb_handle_s
 
     int            paused;
     hb_lock_t    * pause_lock;
+    int64_t        pause_date;
+    int64_t        pause_duration;
 
     volatile int   scan_die;
 
@@ -68,6 +70,7 @@ struct hb_handle_s
 
 hb_work_object_t * hb_objects = NULL;
 int hb_instance_counter = 0;
+int disable_hardware = 0;
 
 static void thread_func( void * );
 
@@ -113,8 +116,10 @@ int hb_picture_fill(uint8_t *data[], int stride[], hb_buffer_t *buf)
 {
     int ret, ii;
 
-    for (ii = 0; ii < 4; ii++)
+    for (ii = 0; ii <= buf->f.max_plane; ii++)
         stride[ii] = buf->plane[ii].stride;
+    for (; ii < 4; ii++)
+        stride[ii] = stride[ii - 1];
 
     ret = av_image_fill_pointers(data, buf->f.fmt,
                                  buf->plane[0].height_stride,
@@ -144,10 +149,12 @@ int hb_picture_crop(uint8_t *data[], int stride[], hb_buffer_t *buf,
               (left >> x_shift);
     data[2] = buf->plane[2].data + (top >> y_shift) * buf->plane[2].stride +
               (left >> x_shift);
+    data[3] = NULL;
 
     stride[0] = buf->plane[0].stride;
     stride[1] = buf->plane[1].stride;
     stride[2] = buf->plane[2].stride;
+    stride[3] = 0;
 
     return 0;
 }
@@ -208,6 +215,7 @@ hb_handle_t * hb_init( int verbose )
     h->state.state = HB_STATE_IDLE;
 
     h->pause_lock = hb_lock_init();
+    h->pause_date = -1;
 
     h->interjob = calloc( sizeof( hb_interjob_t ), 1 );
 
@@ -331,7 +339,10 @@ void hb_remove_previews( hb_handle_t * h )
             {
                 free(filename);
                 filename = hb_strdup_printf("%s/%s", dirname, entry->d_name);
-                unlink( filename );
+                int ulerr = unlink( filename );
+                if (ulerr < 0) {
+                    hb_log("Unable to remove preview: %i - %s", ulerr, filename);
+                }
                 free(filename);
                 break;
             }
@@ -356,7 +367,7 @@ void hb_scan( hb_handle_t * h, const char * path, int title_index,
     hb_title_t * title;
 
     // Check if scanning is necessary.
-    if (!strcmp(h->title_set.path, path))
+    if (h->title_set.path != NULL && !strcmp(h->title_set.path, path))
     {
         // Current title_set path matches requested path.
         // Check if the requested title has already been scanned.
@@ -399,6 +410,8 @@ void hb_scan( hb_handle_t * h, const char * path, int title_index,
         hb_list_rem( h->title_set.list_title, title );
         hb_title_close( &title );
     }
+    free((char*)h->title_set.path);
+    h->title_set.path = NULL;
 
     /* Print CPU info here so that it's in all scan and encode logs */
     const char *cpu_name = hb_get_cpu_name();
@@ -410,9 +423,12 @@ void hb_scan( hb_handle_t * h, const char * path, int title_index,
     }
     hb_log(" - logical processor count: %d", hb_get_cpu_count());
 
-#ifdef USE_QSV
-    /* Print QSV info here so that it's in all scan and encode logs */
-    hb_qsv_info_print();
+#if HB_PROJECT_FEATURE_QSV
+    if (!is_hardware_disabled())
+    {
+        /* Print QSV info here so that it's in all scan and encode logs */
+        hb_qsv_info_print();
+    }
 #endif
 
     hb_log( "hb_scan: path=%s, title_index=%d", path, title_index );
@@ -423,7 +439,8 @@ void hb_scan( hb_handle_t * h, const char * path, int title_index,
 
 void hb_force_rescan( hb_handle_t * h )
 {
-    h->title_set.path[0] = 0;
+    free((char*)h->title_set.path);
+    h->title_set.path = NULL;
 }
 
 /**
@@ -463,7 +480,7 @@ int hb_save_preview( hb_handle_t * h, int title, int preview, hb_buffer_t *buf )
     }
 
     int pp, hh;
-    for( pp = 0; pp < 3; pp++ )
+    for( pp = 0; pp <= buf->f.max_plane; pp++ )
     {
         uint8_t *data = buf->plane[pp].data;
         int stride = buf->plane[pp].stride;
@@ -621,7 +638,7 @@ hb_image_t* hb_get_preview2(hb_handle_t * h, int title_idx, int picture,
                         geo->crop[0], geo->crop[2] );
     }
 
-    int colorspace = hb_ff_get_colorspace(title->color_matrix);
+    int colorspace = hb_sws_get_colorspace(title->color_matrix);
 
     // Get scaling context
     context = hb_sws_get_context(
@@ -696,7 +713,7 @@ int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int thre
     }
 
     /* One pas for Y, one pass for Cb, one pass for Cr */
-    for( k = 0; k < 3; k++ )
+    for( k = 0; k <= buf->f.max_plane; k++ )
     {
         uint8_t * data = buf->plane[k].data;
         int width = buf->plane[k].width;
@@ -1131,7 +1148,7 @@ void hb_set_anamorphic_size2(hb_geometry_t *src_geo,
     hb_limit_rational64(&dst_par_num, &dst_par_den,
                         dst_par_num, dst_par_den, 65535);
 
-    // If the user is directling updating PAR, don't override his values.
+    // If the user is directing updating PAR, don't override his values.
     // I.e. don't even reduce the values.
     hb_reduce(&out_par.num, &out_par.den, dst_par_num, dst_par_den);
     if (geo->mode == HB_ANAMORPHIC_CUSTOM && !keep_display_aspect &&
@@ -1497,25 +1514,28 @@ void hb_rem( hb_handle_t * h, hb_job_t * job )
 void hb_start( hb_handle_t * h )
 {
     hb_lock( h->state_lock );
-    h->state.state = HB_STATE_WORKING;
+    h->state.state       = HB_STATE_WORKING;
+    h->state.sequence_id = 0;
 #define p h->state.param.working
-    p.pass       = -1;
-    p.pass_count = -1;
-    p.progress  = 0.0;
-    p.rate_cur  = 0.0;
-    p.rate_avg  = 0.0;
-    p.hours     = -1;
-    p.minutes   = -1;
-    p.seconds   = -1;
-    p.sequence_id = 0;
+    p.pass         = -1;
+    p.pass_count   = -1;
+    p.progress     = 0.0;
+    p.rate_cur     = 0.0;
+    p.rate_avg     = 0.0;
+    p.eta_seconds  = 0;
+    p.hours        = -1;
+    p.minutes      = -1;
+    p.seconds      = -1;
+    p.paused       = 0;
 #undef p
     hb_unlock( h->state_lock );
 
-    h->paused = 0;
-
-    h->work_die    = 0;
-    h->work_error  = HB_ERROR_NONE;
-    h->work_thread = hb_work_init( h->jobs, &h->work_die, &h->work_error, &h->current_job );
+    h->paused         = 0;
+    h->pause_date     = -1;
+    h->pause_duration = 0;
+    h->work_die       = 0;
+    h->work_error     = HB_ERROR_NONE;
+    h->work_thread    = hb_work_init( h->jobs, &h->work_die, &h->work_error, &h->current_job );
 }
 
 /**
@@ -1529,7 +1549,7 @@ void hb_pause( hb_handle_t * h )
         hb_lock( h->pause_lock );
         h->paused = 1;
 
-        hb_current_job( h )->st_pause_date = hb_get_date();
+        h->pause_date = hb_get_date();
 
         hb_lock( h->state_lock );
         h->state.state = HB_STATE_PAUSED;
@@ -1545,12 +1565,17 @@ void hb_resume( hb_handle_t * h )
 {
     if( h->paused )
     {
-#define job hb_current_job( h )
-        if( job->st_pause_date != -1 )
+        if (h->pause_date != -1)
         {
-           job->st_paused += hb_get_date() - job->st_pause_date;
+            // Calculate paused time for current job sequence
+            h->pause_duration    += hb_get_date() - h->pause_date;
+
+            // Calculate paused time for current job pass
+            // Required to calculate accurate ETA for pass
+            h->current_job->st_paused += hb_get_date() - h->pause_date;
+            h->pause_date              = -1;
+            h->state.param.working.paused = h->pause_duration;
         }
-#undef job
 
         hb_unlock( h->pause_lock );
         h->paused = 0;
@@ -1622,6 +1647,8 @@ void hb_close( hb_handle_t ** _h )
         hb_title_close( &title );
     }
     hb_list_close( &h->title_set.list_title );
+    free((char*)h->title_set.path);
+    h->title_set.path = NULL;
 
     hb_list_close( &h->jobs );
     hb_lock_close( &h->state_lock );
@@ -1635,8 +1662,20 @@ void hb_close( hb_handle_t ** _h )
     *_h = NULL;
 }
 
+int hb_global_init_no_hardware()
+{
+    disable_hardware = 1;
+    hb_log( "Init: Hardware encoders are disabled." );
+    return hb_global_init();
+}
+
 int hb_global_init()
 {
+    /* Print hardening status on global init */
+#if HB_PROJECT_SECURITY_HARDEN
+    hb_log( "Compile-time hardening features are enabled" );
+#endif
+
     int result = 0;
 
     result = hb_platform_init();
@@ -1646,14 +1685,17 @@ int hb_global_init()
         return -1;
     }
 
-#ifdef USE_QSV
-    result = hb_qsv_info_init();
-    if (result < 0)
+#if HB_PROJECT_FEATURE_QSV
+    if (!disable_hardware)
     {
-        hb_error("hb_qsv_info_init failed!");
-        return -1;
+        result = hb_qsv_info_init();
+        if (result < 0)
+        {
+            hb_error("hb_qsv_info_init failed!");
+            return -1;
+        }
+        hb_param_configure_qsv();
     }
-    hb_param_configure_qsv();
 #endif
 
     /* libavcodec */
@@ -1668,14 +1710,10 @@ int hb_global_init()
     hb_register(&hb_decavcodecv);
     hb_register(&hb_decavcodeca);
     hb_register(&hb_declpcm);
-    hb_register(&hb_deccc608);
-    hb_register(&hb_decpgssub);
+    hb_register(&hb_decavsub);
     hb_register(&hb_decsrtsub);
     hb_register(&hb_decssasub);
     hb_register(&hb_dectx3gsub);
-    hb_register(&hb_decutf8sub);
-    hb_register(&hb_decvobsub);
-    hb_register(&hb_encvobsub);
     hb_register(&hb_encavcodec);
     hb_register(&hb_encavcodeca);
 #ifdef __APPLE__
@@ -1685,15 +1723,18 @@ int hb_global_init()
     hb_register(&hb_enctheora);
     hb_register(&hb_encvorbis);
     hb_register(&hb_encx264);
-#ifdef USE_X265
+#if HB_PROJECT_FEATURE_X265
     hb_register(&hb_encx265);
 #endif
-#ifdef USE_QSV
-    hb_register(&hb_encqsv);
+#if HB_PROJECT_FEATURE_QSV
+    if (!disable_hardware)
+    {
+        hb_register(&hb_encqsv);
+    }
 #endif
 
     hb_x264_global_init();
-    hb_common_global_init();
+    hb_common_global_init(disable_hardware);
 
     /*
      * Initialise buffer pool
@@ -1804,6 +1845,11 @@ static void thread_func( void * _h )
             hb_unlock( h->state_lock );
         }
 
+        if (h->paused)
+        {
+            h->state.param.working.paused = h->pause_duration +
+                                            hb_get_date() - h->pause_date;
+        }
         hb_snooze( 50 );
     }
 
@@ -1879,9 +1925,7 @@ void hb_set_state( hb_handle_t * h, hb_state_t * s )
     {
         // Set which job is being worked on
         if (h->current_job)
-            h->state.param.working.sequence_id = h->current_job->sequence_id;
-        else
-            h->state.param.working.sequence_id = 0;
+            h->state.sequence_id = h->current_job->sequence_id;
     }
     hb_unlock( h->state_lock );
     hb_unlock( h->pause_lock );
@@ -1906,4 +1950,8 @@ void hb_system_sleep_prevent(hb_handle_t *h)
 hb_interjob_t * hb_interjob_get( hb_handle_t * h )
 {
     return h->interjob;
+}
+
+int is_hardware_disabled(void){
+    return disable_hardware;
 }

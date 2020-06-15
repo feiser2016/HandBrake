@@ -138,9 +138,7 @@ NLMeans is a high quality denoise filter with a cost to speed. Use where quality
 HQDN3D is an adaptive low-pass filter, faster than NLMeans but less effective at preserving fine detail.</value>
   </data>
   <data name="FilterView_Detelecine" xml:space="preserve">
-    <value>This filter removes 'combing' artifacts that are the result of telecining.
-
-Telecining is a process that adjusts film framerates that are 24fps to NTSC video frame rates which are 30fps.</value>
+    <value>Detelecine removes comb artifacts that are the result of telecine, a process for converting film frame rates to television frame rates.</value>
   </data>
   <data name="FilterView_Grayscale" xml:space="preserve">
     <value>Grayscale removes the color component of the video. Often referred to as Black &amp;amp; White video.</value>
@@ -220,9 +218,6 @@ The actual display dimensions will differ if the pixel aspect ratio is not 1:1.<
   </data>
   <data name="QueueView_SendJobBack" xml:space="preserve">
     <value>Send the job back to the main window for editing.</value>
-  </data>
-  <data name="Video_AdvancedOptions" xml:space="preserve">
-    <value>Use advanced options Tab for x264 settings.</value>
   </data>
   <data name="Video_AvgBitrate" xml:space="preserve">
     <value>Set the average bitrate.
@@ -465,5 +460,9 @@ Lapsharp's Sprite tune is useful for 1-/4-/8-/16-bit 2-dimensional games. Sprite
   </data>
   <data name="MainView_StartPoint" xml:space="preserve">
     <value>The start point for this range.</value>
+  </data>
+  <data name="OptionsView_AlwaysUseDefaultPath" xml:space="preserve">
+    <value>When enabled the auto name system will always use the default path. 
+When disabled, it will use the path in the destination box on the main window if populated, otherwise it will use the default path.</value>
   </data>
 </root>

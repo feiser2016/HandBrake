@@ -7,37 +7,15 @@
 #import "HBUtilities.h"
 #import <Cocoa/Cocoa.h>
 
-#import "HBTitle.h"
-#import "HBJob.h"
+#include "handbrake/lang.h"
 
-#include "common.h"
-#include "lang.h"
-
-static NSDateFormatter *_timeFormatter = nil;
-static NSDateFormatter *_dateFormatter = nil;
-static NSDateFormatter *_releaseDateFormatter = nil;
+static BOOL hb_resolveBookmarks = YES;
 
 @implementation HBUtilities
 
-+ (void)initialize
-{
-    if (self == [HBUtilities class]) {
-        _dateFormatter = [[NSDateFormatter alloc] init];
-        [_dateFormatter setDateStyle:NSDateFormatterShortStyle];
-        [_dateFormatter setTimeStyle:NSDateFormatterNoStyle];
-
-        _timeFormatter = [[NSDateFormatter alloc] init];
-        [_timeFormatter setDateStyle:NSDateFormatterNoStyle];
-        [_timeFormatter setTimeStyle:NSDateFormatterShortStyle];
-
-        _releaseDateFormatter = [[NSDateFormatter alloc] init];
-        [_releaseDateFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss'Z'"];
-    }
-}
-
 + (NSString *)handBrakeVersion
 {
-    NSDictionary *infoDictionary = [[NSBundle mainBundle] infoDictionary];
+    NSDictionary *infoDictionary = NSBundle.mainBundle.infoDictionary;
     return [NSString stringWithFormat:@"Handbrake Version: %@ (%@)",
             infoDictionary[@"CFBundleShortVersionString"],
             infoDictionary[@"CFBundleVersion"]];
@@ -57,6 +35,11 @@ static NSDateFormatter *_releaseDateFormatter = nil;
     return appSupportURL;
 }
 
++ (NSURL *)documentationURL
+{
+    return [NSURL URLWithString:@"https://handbrake.fr/docs/en/1.3.0/"];
+}
+
 + (void)writeToActivityLog:(const char *)format, ...
 {
     va_list args;
@@ -73,8 +56,42 @@ static NSDateFormatter *_releaseDateFormatter = nil;
     va_end(args);
 }
 
++ (void)writeErrorToActivityLog:(NSError *)error
+{
+    [self writeToActivityLog:"Error domain: %s", error.domain.UTF8String];
+    [self writeToActivityLog:"Error code: %d", error.code];
+    if (error.localizedDescription)
+    {
+        [self writeToActivityLog:"Error description: %s", error.localizedDescription.UTF8String];
+    }
+    if (error.debugDescription)
+    {
+        [self writeToActivityLog:"Error debug description: %s", error.debugDescription.UTF8String];
+    }
+}
+
++ (void)writeToActivityLogWithNoHeader:(NSString *)text
+{
+    fprintf(stderr, "%s", text.UTF8String);
+}
+
++ (void)setResolveBookmarks:(BOOL)resolveBookmarks
+{
+    hb_resolveBookmarks = resolveBookmarks;
+}
+
++ (BOOL)resolveBookmarks
+{
+    return hb_resolveBookmarks;
+}
+
 + (nullable NSURL *)URLFromBookmark:(NSData *)bookmark
 {
+    if (hb_resolveBookmarks == NO)
+    {
+        return nil;
+    }
+
     NSParameterAssert(bookmark);
 
     NSError *error;
@@ -84,8 +101,7 @@ static NSDateFormatter *_releaseDateFormatter = nil;
 
     if (error)
     {
-        NSString *error_message = [NSString stringWithFormat:@"Failed to resolved bookmark: %@", error];
-        [HBUtilities writeToActivityLog:"%s", error_message.UTF8String];
+        [HBUtilities writeErrorToActivityLog:error];
     }
 
     return isStale ? nil : url;
@@ -118,7 +134,7 @@ static NSDateFormatter *_releaseDateFormatter = nil;
     NSURL *mediaURL = URL;
 
     // We check to see if the chosen file at path is a package
-    if ([[NSWorkspace sharedWorkspace] isFilePackageAtPath:URL.path])
+    if ([NSWorkspace.sharedWorkspace isFilePackageAtPath:URL.path])
     {
         [HBUtilities writeToActivityLog:"trying to open a package at: %s", URL.path.UTF8String];
         // We check to see if this is an .eyetv package
@@ -175,172 +191,6 @@ static NSDateFormatter *_releaseDateFormatter = nil;
     return mediaURL;
 }
 
-+ (nullable NSDate *)releaseDate:(HBTitle *)title
-{
-    if ([title.metadata.releaseDate length] == 0)
-    {
-        return nil;
-    }
-    else
-    {
-        return [_releaseDateFormatter dateFromString:title.metadata.releaseDate];
-    }
-}
-
-+ (NSString *)automaticNameForJob:(HBJob *)job
-{
-    HBTitle *title = job.title;
-    
-    NSDate *releaseDate = [self releaseDate:title];
-    if (releaseDate == nil)
-    {
-        NSDictionary* fileAttribs = [[NSFileManager defaultManager] attributesOfItemAtPath:job.fileURL.path error:nil];
-        releaseDate = [fileAttribs objectForKey:NSFileCreationDate];
-    }
-
-    // Generate a new file name
-    NSString *fileName = [HBUtilities automaticNameForSource:title.name
-                                                       title:title.index
-                                                    chapters:NSMakeRange(job.range.chapterStart + 1, job.range.chapterStop + 1)
-                                                     quality:job.video.qualityType ? job.video.quality : 0
-                                                     bitrate:!job.video.qualityType ? job.video.avgBitrate : 0
-                                                  videoCodec:job.video.encoder
-                                                creationDate:releaseDate];
-    return fileName;
-}
-
-+ (NSString *)automaticExtForJob:(HBJob *)job
-{
-    NSString *extension = @(hb_container_get_default_extension(job.container));
-
-    if (job.container & HB_MUX_MASK_MP4)
-    {
-        BOOL anyCodecAC3 = [job.audio anyCodecMatches:HB_ACODEC_AC3] || [job.audio anyCodecMatches:HB_ACODEC_AC3_PASS];
-        // Chapter markers are enabled if the checkbox is ticked and we are doing p2p or we have > 1 chapter
-        BOOL chapterMarkers = (job.chaptersEnabled) &&
-        (job.range.type != HBRangeTypeChapters || job.range.chapterStart < job.range.chapterStop);
-
-        if ([[[NSUserDefaults standardUserDefaults] objectForKey:@"DefaultMpegExtension"] isEqualToString:@".m4v"] ||
-            ((YES == anyCodecAC3 || YES == chapterMarkers) &&
-             [[[NSUserDefaults standardUserDefaults] objectForKey:@"DefaultMpegExtension"] isEqualToString:@"Auto"]))
-        {
-            extension = @"m4v";
-        }
-    }
-
-    return extension;
-}
-
-+ (NSString *)defaultNameForJob:(HBJob *)job
-{
-    // Generate a new file name
-    NSString *fileName = job.title.name;
-
-    // If Auto Naming is on. We create an output filename by using the
-    // format set int he preferences.
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DefaultAutoNaming"])
-    {
-        fileName = [self automaticNameForJob:job];
-    }
-
-    // use the correct extension based on the container
-    NSString *ext = [self automaticExtForJob:job];
-    fileName = [fileName stringByAppendingPathExtension:ext];
-    return fileName;
-}
-
-+ (NSString *)automaticNameForSource:(NSString *)sourceName
-                               title:(NSUInteger)title
-                            chapters:(NSRange)chaptersRange
-                             quality:(double)quality
-                             bitrate:(int)bitrate
-                          videoCodec:(uint32_t)codec
-                         creationDate:(NSDate *)creationDate
-{
-    NSMutableString *name = [[NSMutableString alloc] init];
-    // The format array contains the tokens as NSString
-    NSArray<NSString *> *format = [[NSUserDefaults standardUserDefaults] objectForKey:@"HBAutoNamingFormat"];
-
-    for (NSString *formatKey in format)
-    {
-        if ([formatKey isEqualToString:@"{Source}"])
-        {
-            if ([[NSUserDefaults standardUserDefaults] boolForKey:@"HBAutoNamingRemoveUnderscore"])
-            {
-                sourceName = [sourceName stringByReplacingOccurrencesOfString:@"_" withString:@" "];
-            }
-            if ([[NSUserDefaults standardUserDefaults] boolForKey:@"HBAutoNamingRemovePunctuation"])
-            {
-                sourceName = [sourceName stringByReplacingOccurrencesOfString:@"-" withString:@""];
-                sourceName = [sourceName stringByReplacingOccurrencesOfString:@"." withString:@""];
-                sourceName = [sourceName stringByReplacingOccurrencesOfString:@"," withString:@""];
-                sourceName = [sourceName stringByReplacingOccurrencesOfString:@";" withString:@""];
-            }
-            if ([[NSUserDefaults standardUserDefaults] boolForKey:@"HBAutoNamingTitleCase"])
-            {
-                sourceName = [sourceName capitalizedString];
-            }
-            [name appendString:sourceName];
-        }
-        else if ([formatKey isEqualToString:@"{Title}"])
-        {
-            [name appendFormat:@"%lu", (unsigned long)title];
-        }
-        else if ([formatKey isEqualToString:@"{Date}"])
-        {
-            NSDate *date = [NSDate date];
-            NSString *dateString = [[_dateFormatter stringFromDate:date] stringByReplacingOccurrencesOfString:@"/" withString:@"-"];
-            [name appendString:dateString];
-        }
-        else if ([formatKey isEqualToString:@"{Time}"])
-        {
-            NSDate *date = [NSDate date];
-            [name appendString:[_timeFormatter stringFromDate:date]];
-        }
-        else if ([formatKey isEqualToString:@"{Creation-Date}"])
-        {
-            NSString *dateString = [[_dateFormatter stringFromDate:creationDate] stringByReplacingOccurrencesOfString:@"/" withString:@"-"];
-            [name appendString:dateString];
-
-        }
-        else if ([formatKey isEqualToString:@"{Creation-Time}"])
-        {
-            [name appendString:[_timeFormatter stringFromDate:creationDate]];
-        }
-        else if ([formatKey isEqualToString:@"{Chapters}"])
-        {
-            if (chaptersRange.location == chaptersRange.length)
-            {
-                [name appendFormat:@"%lu", (unsigned long)chaptersRange.location];
-            }
-            else
-            {
-                [name appendFormat:@"%lu-%lu", (unsigned long)chaptersRange.location, (unsigned long)chaptersRange.length];
-            }
-        }
-        else if ([formatKey isEqualToString:@"{Quality/Bitrate}"])
-        {
-            if (bitrate)
-            {
-                [name appendString:@"abr"];
-                [name appendString:[NSString stringWithFormat:@"%d", bitrate]];
-            }
-            else
-            {
-                // Append the right quality suffix for the selected codec (rf/qp)
-                [name appendString:[@(hb_video_quality_get_name(codec)) lowercaseString]];
-                [name appendString:[NSString stringWithFormat:@"%0.2f", quality]];
-            }
-        }
-        else
-        {
-            [name appendString:formatKey];
-        }
-    }
-
-    return [name copy];
-}
-
 + (NSString *)isoCodeForNativeLang:(NSString *)language
 {
     const iso639_lang_t *lang = lang_get_next(NULL);
@@ -375,6 +225,65 @@ static NSDateFormatter *_releaseDateFormatter = nil;
         return @(lang->eng_name);
     }
     return @"Unknown";
+}
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED < __MAC_10_14
+enum {
+    errAEEventWouldRequireUserConsent = -1744,
+};
+#endif
+
++ (HBPrivacyConsentState)determinePermissionToAutomateTarget:(NSString *)bundleIdentifier promptIfNeeded:(BOOL)promptIfNeeded
+{
+    if (@available(macOS 10.14, *))
+    {
+        const char *identifierCString = bundleIdentifier.UTF8String;
+        AEAddressDesc addressDesc;
+
+        if ([bundleIdentifier isEqualToString:@"com.apple.systemevents"])
+        {
+            // Mare sure system events is running, if not the consent alert will not be shown.
+            BOOL result = [NSWorkspace.sharedWorkspace launchAppWithBundleIdentifier:bundleIdentifier options:0 additionalEventParamDescriptor:nil launchIdentifier:NULL];
+            if (result == NO)
+            {
+                [HBUtilities writeToActivityLog:"Automation: couldn't launch %s.", bundleIdentifier.UTF8String];
+            }
+        }
+
+        OSErr descResult = AECreateDesc(typeApplicationBundleID, identifierCString, strlen(identifierCString), &addressDesc);
+
+        if (descResult == noErr)
+        {
+            OSStatus permission = AEDeterminePermissionToAutomateTarget(&addressDesc, typeWildCard, typeWildCard, promptIfNeeded);
+            AEDisposeDesc(&addressDesc);
+
+            HBPrivacyConsentState result;
+
+            switch (permission)
+            {
+                case errAEEventWouldRequireUserConsent:
+                    [HBUtilities writeToActivityLog:"Automation: request user consent for %s.", bundleIdentifier.UTF8String];
+                    result = HBPrivacyConsentStateUnknown;
+                    break;
+                case noErr:
+                    [HBUtilities writeToActivityLog:"Automation: permission granted for %s.", bundleIdentifier.UTF8String];
+                    result = HBPrivacyConsentStateGranted;
+                    break;
+                case errAEEventNotPermitted:
+                    [HBUtilities writeToActivityLog:"Automation: permission not granted for %s.", bundleIdentifier.UTF8String];
+                    result = HBPrivacyConsentStateDenied;
+                    break;
+                case procNotFound:
+                default:
+                    [HBUtilities writeToActivityLog:"Automation: permission unknown."];
+                    result = HBPrivacyConsentStateUnknown;
+                    break;
+            }
+            return result;
+        }
+    }
+
+    return HBPrivacyConsentStateGranted;
 }
 
 @end

@@ -12,73 +12,91 @@ namespace HandBrake.Worker
     using System;
     using System.Collections.Generic;
     using System.Net;
+    using System.Runtime.CompilerServices;
+    using System.Threading;
+
+    using HandBrake.Worker.Routing;
 
     public class Program
     {
-        /*
-         * TODO
-         * Methods:
-         *   1. Fetch Log
-         *   2. Fetch Log since last index.
-         * Services:
-         *   3. Support for connecting via sockets.
-         *   4. All methods will return a json state object response.
-         */
-
         private static ApiRouter router;
+        private static ManualResetEvent manualResetEvent = new ManualResetEvent(false);
 
         public static void Main(string[] args)
         {
-            Console.WriteLine("Starting Web Server ...");
-            router = new ApiRouter();
-
-            Dictionary<string, Func<HttpListenerRequest, string>> apiHandlers = RegisterApiHandlers();
-
-            int port = 8080; // Default Port;
-
+            int port = 8037; // Default Port;
+            string token = null;
+            
             if (args.Length != 0)
             {
                 foreach (string argument in args)
                 {
                     if (argument.StartsWith("--port"))
                     {
-                        string portStr = argument.TrimStart("--port=".ToCharArray());
-                        if (int.TryParse(portStr, out var parsedPort))
+                        string value = argument.TrimStart("--port=".ToCharArray());
+                        if (int.TryParse(value, out var parsedPort))
                         {
                             port = parsedPort;
                         }
                     }
+
+                    if (argument.StartsWith("--token"))
+                    {
+                        token = argument.TrimStart("--token=".ToCharArray());
+                    }
                 }
             }
 
-            Console.WriteLine("Using Port: {0}", port);
+            Console.WriteLine("Worker: Starting HandBrake Engine ...");
+            router = new ApiRouter();
+            router.TerminationEvent += Router_TerminationEvent;
 
-            HttpServer webServer = new HttpServer(apiHandlers, port);
+            Console.WriteLine("Worker: Starting Web Server on port {0} ...", port);
+            Dictionary<string, Func<HttpListenerRequest, string>> apiHandlers = RegisterApiHandlers();
+            HttpServer webServer = new HttpServer(apiHandlers, port, token);
             webServer.Run();
 
-            Console.WriteLine("Webserver Started");
-            Console.WriteLine("Press any key to exit");
-
-            Console.ReadKey(); // Block from closing.
+            Console.WriteLine("Worker: Server Started");
+            
+            manualResetEvent.WaitOne();
 
             webServer.Stop();
         }
 
-        public static Dictionary<string, Func<HttpListenerRequest, string>> RegisterApiHandlers()
+        private static Dictionary<string, Func<HttpListenerRequest, string>> RegisterApiHandlers()
         {
             Dictionary<string, Func<HttpListenerRequest, string>> apiHandlers =
                 new Dictionary<string, Func<HttpListenerRequest, string>>();
 
-            apiHandlers.Add("Version", router.GetVersionInfo); 
+            // Process Handling
+            apiHandlers.Add("Shutdown", ShutdownServer);
+            apiHandlers.Add("GetInstanceToken", router.GetInstanceToken);
+            apiHandlers.Add("Version", router.GetVersionInfo);
+
+            // Logging
+            apiHandlers.Add("GetAllLogMessages", router.GetAllLogMessages);
+            apiHandlers.Add("GetLogMessagesFromIndex", router.GetLogMessagesFromIndex);
+            apiHandlers.Add("ResetLogging", router.ResetLogging);
+
+            // HandBrake APIs
             apiHandlers.Add("StartEncode", router.StartEncode);
             apiHandlers.Add("PauseEncode", router.PauseEncode);
             apiHandlers.Add("ResumeEncode", router.ResumeEncode);
             apiHandlers.Add("StopEncode", router.StopEncode);
             apiHandlers.Add("PollEncodeProgress", router.PollEncodeProgress);
-            apiHandlers.Add("SetConfiguration", router.SetConfiguration);
-            apiHandlers.Add("Initialise", router.Initialise);
-           
+            
             return apiHandlers;
+        }
+
+        private static void Router_TerminationEvent(object sender, EventArgs e)
+        {
+            ShutdownServer(null);
+        }
+        
+        private static string ShutdownServer(HttpListenerRequest request)
+        {
+            manualResetEvent.Set();
+            return "Server Terminated";
         }
     }
 }

@@ -8,6 +8,7 @@
 
 #import "HBPreviewViewController.h"
 #import "HBPreviewGenerator.h"
+#import "HBPreferencesKeys.h"
 
 @import HandBrakeKit;
 
@@ -17,10 +18,9 @@ static void *HBSummaryViewControllerPictureContext = &HBSummaryViewControllerPic
 static void *HBSummaryViewControllerFiltersContext = &HBSummaryViewControllerFiltersContext;
 static void *HBSummaryViewControllerAudioContext = &HBSummaryViewControllerAudioContext;
 static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsContext;
+static void *HBSummaryViewControllerPreferencesContext = &HBSummaryViewControllerPreferencesContext;
 
 @interface HBSummaryViewController ()
-
-@property (nonatomic, strong) IBOutlet NSLayoutConstraint *bottomOptionsConstrain;
 
 @property (nonatomic, strong) IBOutlet NSTextField *tracksLabel;
 @property (nonatomic, strong) IBOutlet NSTextField *filtersLabel;
@@ -46,10 +46,18 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
     if (self)
     {
         _labelColor = [NSColor disabledControlTextColor];
-
         _previewViewController = [[HBPreviewViewController alloc] init];
+
+        [NSUserDefaultsController.sharedUserDefaultsController addObserver:self forKeyPath:@"values.HBShowSummaryPreview"
+                                                                   options:0 context:HBSummaryViewControllerPreferencesContext];
     }
     return self;
+}
+
+- (void)dealloc
+{
+    self.job = nil;
+    [NSUserDefaultsController.sharedUserDefaultsController removeObserver:self forKeyPath:@"values.HBShowSummaryPreview" context:HBSummaryViewControllerPreferencesContext];
 }
 
 - (void)viewDidLoad
@@ -63,7 +71,8 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
 
 - (void)setGenerator:(HBPreviewGenerator *)generator
 {
-    self.previewViewController.generator = generator;
+    _generator = generator;
+    self.previewViewController.generator = [NSUserDefaults.standardUserDefaults boolForKey:HBShowSummaryPreview] ? generator : nil;
 }
 
 - (void)setJob:(HBJob *)job
@@ -117,14 +126,6 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
     }
     else if (context == HBSummaryViewControllerContainerContext)
     {
-        if ([change[NSKeyValueChangeNewKey] integerValue] & 0x030000)
-        {
-            self.bottomOptionsConstrain.active = YES;
-        }
-        else
-        {
-            self.bottomOptionsConstrain.active = NO;
-        }
         [self updateTracks:nil];
     }
     else if (context == HBSummaryViewControllerVideoContext)
@@ -134,6 +135,10 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
     else if (context == HBSummaryViewControllerFiltersContext)
     {
         [self updatePicture:nil];
+    }
+    else if (context == HBSummaryViewControllerPreferencesContext)
+    {
+        self.generator = self.generator;
     }
     else
     {
@@ -154,8 +159,8 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
 {
     for (HBAudioTrack *track in tracks)
     {
-        [track removeObserver:self forKeyPath:@"encoder"];
-        [track removeObserver:self forKeyPath:@"mixdown"];
+        [track removeObserver:self forKeyPath:@"encoder" context:HBSummaryViewControllerAudioContext];
+        [track removeObserver:self forKeyPath:@"mixdown" context:HBSummaryViewControllerAudioContext];
     }
 }
 
@@ -171,7 +176,7 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
 {
     for (HBSubtitlesTrack *track in tracks)
     {
-        [track removeObserver:self forKeyPath:@"burnedIn"];
+        [track removeObserver:self forKeyPath:@"burnedIn" context:HBSummaryViewControllerSubsContext];
     }
 }
 
@@ -205,16 +210,16 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
         [[NSNotificationCenter defaultCenter] removeObserver:self name:HBPictureChangedNotification object:_job.picture];
         [[NSNotificationCenter defaultCenter] removeObserver:self name:HBFiltersChangedNotification object:_job.filters];
 
-        [_job removeObserver:self forKeyPath:@"container"];
-        [_job removeObserver:self forKeyPath:@"chaptersEnabled"];
-        [_job removeObserver:self forKeyPath:@"video.encoder"];
-        [_job removeObserver:self forKeyPath:@"video.frameRate"];
-        [_job removeObserver:self forKeyPath:@"video.frameRateMode"];
-        [_job removeObserver:self forKeyPath:@"filters.deinterlace"];
-        [_job removeObserver:self forKeyPath:@"filters.rotate"];
-        [_job removeObserver:self forKeyPath:@"filters.flip"];
-        [_job removeObserver:self forKeyPath:@"audio.tracks"];
-        [_job removeObserver:self forKeyPath:@"subtitles.tracks"];
+        [_job removeObserver:self forKeyPath:@"container" context:HBSummaryViewControllerContainerContext];
+        [_job removeObserver:self forKeyPath:@"chaptersEnabled" context:HBSummaryViewControllerVideoContext];
+        [_job removeObserver:self forKeyPath:@"video.encoder" context:HBSummaryViewControllerVideoContext];
+        [_job removeObserver:self forKeyPath:@"video.frameRate" context:HBSummaryViewControllerVideoContext];
+        [_job removeObserver:self forKeyPath:@"video.frameRateMode" context:HBSummaryViewControllerVideoContext];
+        [_job removeObserver:self forKeyPath:@"filters.deinterlace" context:HBSummaryViewControllerFiltersContext];
+        [_job removeObserver:self forKeyPath:@"filters.rotate" context:HBSummaryViewControllerFiltersContext];
+        [_job removeObserver:self forKeyPath:@"filters.flip" context:HBSummaryViewControllerFiltersContext];
+        [_job removeObserver:self forKeyPath:@"audio.tracks" context:HBSummaryViewControllerAudioContext];
+        [_job removeObserver:self forKeyPath:@"subtitles.tracks" context:HBSummaryViewControllerSubsContext];
 
         [self removeAudioTracksObservers:_job.audio.tracks];
         [self removeSubtitlesTracksObservers:_job.subtitles.tracks];
@@ -241,7 +246,7 @@ static void *HBSummaryViewControllerSubsContext = &HBSummaryViewControllerSubsCo
 
 - (void)updatePicture:(NSNotification *)notification
 {
-    // Enquee the reload call on the main runloop
+    // Enqueue the reload call on the main runloop
     // to avoid reloading the same image multiple times.
     if (self.pictureReloadInQueue == NO)
     {

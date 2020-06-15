@@ -1,5 +1,5 @@
 ﻿// --------------------------------------------------------------------------------------------------------------------
-// <copyright file="Working.cs" company="HandBrake Project (http://handbrake.fr)">
+// <copyright file="Working.cs" company="HandBrake Project (https://handbrake.fr)">
 //   This file is part of the HandBrake source code - It may be used under the terms of the GNU General Public License.
 // </copyright>
 // <summary>
@@ -69,5 +69,10 @@ namespace HandBrake.Interop.Interop.Json.State
         /// Gets or sets the sequence id.
         /// </summary>
         public int SequenceID { get; set; }
+
+        /// <summary>
+        /// Gets total time remaining in seconds.
+        /// </summary>
+        public int ETASeconds { get; set; }
     }
 }

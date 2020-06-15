@@ -1,14 +1,14 @@
 /* rendersub.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
-#include "hbffmpeg.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/hbffmpeg.h"
 #include <ass/ass.h>
 
 #define ABS(a) ((a) > 0 ? (a) : (-(a)))
@@ -22,7 +22,7 @@ struct hb_filter_private_s
     int                 sws_width;
     int                 sws_height;
 
-    // VOBSUB
+    // VOBSUB && PGSSUB
     hb_list_t         * sub_list; // List of active subs
 
     // SSA
@@ -34,6 +34,9 @@ struct hb_filter_private_s
     // SRT
     int                 line;
     hb_buffer_t       * current_sub;
+
+    hb_filter_init_t    input;
+    hb_filter_init_t    output;
 };
 
 // VOBSUB
@@ -101,6 +104,8 @@ hb_filter_object_t hb_filter_render_sub =
     .close         = hb_rendersub_close,
 };
 
+// blends src YUVA420P buffer into dst
+// dst is currently YUV420P, but in future will be other formats as well
 static void blend( hb_buffer_t *dst, hb_buffer_t *src, int left, int top )
 {
     int xx, yy;
@@ -183,8 +188,10 @@ static void blend( hb_buffer_t *dst, hb_buffer_t *src, int left, int top )
     }
 }
 
-// Assumes that the input buffer has the same dimensions
-// as the original title diminsions
+// applies subtitle 'sub' YUVA420P buffer into destination 'buf'
+// 'buf' is currently YUV420P, but in future will be other formats as well
+// Assumes that the input destination buffer has the same dimensions
+// as the original title dimensions
 static void ApplySub( hb_filter_private_t * pv, hb_buffer_t * buf, hb_buffer_t * sub )
 {
     blend( buf, sub, sub->f.x, sub->f.y );
@@ -224,7 +231,11 @@ static hb_buffer_t * ScaleSubtitle(hb_filter_private_t *pv,
 
         width       = sub->f.width  * xfactor;
         height      = sub->f.height * yfactor;
+        // Note that subtitle frame buffer is YUVA420P, not YUV420P, it has alpha
         scaled      = hb_frame_buffer_init(AV_PIX_FMT_YUVA420P, width, height);
+        if (scaled == NULL)
+            return NULL;
+
         scaled->f.x = sub->f.x * xfactor;
         scaled->f.y = sub->f.y * yfactor;
 
@@ -328,12 +339,14 @@ static hb_buffer_t * ScaleSubtitle(hb_filter_private_t *pv,
 }
 
 // Assumes that the input buffer has the same dimensions
-// as the original title diminsions
+// as the original title dimensions
 static void ApplyVOBSubs( hb_filter_private_t * pv, hb_buffer_t * buf )
 {
     int ii;
     hb_buffer_t *sub, *next;
 
+    // Note that VOBSUBs can overlap in time.
+    // I.e. more than one may be rendered to the screen at once.
     for( ii = 0; ii < hb_list_count(pv->sub_list); )
     {
         sub = hb_list_item( pv->sub_list, ii );
@@ -441,6 +454,7 @@ static uint8_t ssaAlpha( ASS_Image *frame, int x, int y )
     return (uint8_t)alpha;
 }
 
+// Returns a subtitle rendered to a YUVA420P frame
 static hb_buffer_t * RenderSSAFrame( hb_filter_private_t * pv, ASS_Image * frame )
 {
     hb_buffer_t *sub;
@@ -456,8 +470,9 @@ static hb_buffer_t * RenderSSAFrame( hb_filter_private_t * pv, ASS_Image * frame
     unsigned frameV = (yuv >> 8 ) & 0xff;
     unsigned frameU = (yuv >> 0 ) & 0xff;
 
-    sub = hb_frame_buffer_init( AV_PIX_FMT_YUVA420P, frame->w, frame->h );
-    if( sub == NULL )
+    // Note that subtitle frame buffer is YUVA420P, not YUV420P, it has alpha
+    sub = hb_frame_buffer_init(AV_PIX_FMT_YUVA420P, frame->w, frame->h);
+    if (sub == NULL)
         return NULL;
 
     uint8_t *y_out, *u_out, *v_out, *a_out;
@@ -940,6 +955,8 @@ static int hb_rendersub_init( hb_filter_object_t * filter,
     hb_subtitle_t *subtitle;
     int ii;
 
+    pv->input = *init;
+
     // Find the subtitle we need
     for( ii = 0; ii < hb_list_count(init->job->list_subtitle); ii++ )
     {
@@ -957,6 +974,8 @@ static int hb_rendersub_init( hb_filter_object_t * filter,
         hb_log("rendersub: no subtitle marked for burn");
         return 1;
     }
+    pv->output = *init;
+
     return 0;
 }
 
@@ -974,37 +993,38 @@ static int hb_rendersub_post_init( hb_filter_object_t * filter, hb_job_t *job )
         case VOBSUB:
         {
             return vobsub_post_init( filter, job );
-        } break;
+        }
 
         case SSASUB:
         {
             return ssa_post_init( filter, job );
-        } break;
+        }
 
-        case SRTSUB:
+        case IMPORTSRT:
+        case IMPORTSSA:
         case UTF8SUB:
         case TX3GSUB:
         {
             return textsub_post_init( filter, job );
-        } break;
+        }
 
         case CC608SUB:
         {
             return cc608sub_post_init( filter, job );
-        } break;
+        }
 
+        case DVBSUB:
         case PGSSUB:
         {
             return pgssub_post_init( filter, job );
-        } break;
+        }
 
         default:
         {
             hb_log("rendersub: unsupported subtitle format %d", pv->type );
             return 1;
-        } break;
+        }
     }
-    return 0;
 }
 
 static int hb_rendersub_work( hb_filter_object_t * filter,
@@ -1017,31 +1037,33 @@ static int hb_rendersub_work( hb_filter_object_t * filter,
         case VOBSUB:
         {
             return vobsub_work( filter, buf_in, buf_out );
-        } break;
+        }
 
         case SSASUB:
         {
             return ssa_work( filter, buf_in, buf_out );
-        } break;
+        }
 
-        case SRTSUB:
+        case IMPORTSRT:
+        case IMPORTSSA:
         case CC608SUB:
         case UTF8SUB:
         case TX3GSUB:
         {
             return textsub_work( filter, buf_in, buf_out );
-        } break;
+        }
 
+        case DVBSUB:
         case PGSSUB:
         {
             return pgssub_work( filter, buf_in, buf_out );
-        } break;
+        }
 
         default:
         {
             hb_error("rendersub: unsupported subtitle format %d", pv->type );
             return 1;
-        } break;
+        }
     }
 }
 
@@ -1065,7 +1087,8 @@ static void hb_rendersub_close( hb_filter_object_t * filter )
             ssa_close( filter );
         } break;
 
-        case SRTSUB:
+        case IMPORTSRT:
+        case IMPORTSSA:
         case CC608SUB:
         case UTF8SUB:
         case TX3GSUB:
@@ -1073,6 +1096,7 @@ static void hb_rendersub_close( hb_filter_object_t * filter )
             textsub_close( filter );
         } break;
 
+        case DVBSUB:
         case PGSSUB:
         {
             pgssub_close( filter );

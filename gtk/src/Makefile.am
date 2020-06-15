@@ -34,27 +34,27 @@ icons_dep =	\
 	icons/scalable/apps/hb-complete.svg \
 	icons/scalable/apps/hb-edit.svg \
 	icons/scalable/apps/hb-icon.svg \
+	icons/scalable/apps/hb-advanced.svg \
 	icons/scalable/apps/fr.handbrake.ghb.svg
 
 hb_menu = fr.handbrake.ghb.desktop
 
-@INTLTOOL_XML_RULE@
-appdatadir = $(datarootdir)/metainfo
-appdata_in_files = fr.handbrake.ghb.appdata.xml.in
-appdata_DATA = $(appdata_in_files:.xml.in=.xml)
-dist_appdata_DATA = $(appdata_files)
+metainfodir = $(datarootdir)/metainfo
+metainfo_in_files = fr.handbrake.ghb.metainfo.xml.in
+metainfo_DATA = $(metainfo_in_files:.xml.in=.xml)
+dist_metainfo_DATA = $(metainfo_files)
 
 EXTRA_DIST = \
-	$(appdata_in_files)
+	$(metainfo_in_files)
 
 DISTCLEANFILES = \
-	$(appdata_files)
+	$(metainfo_files)
 
 AM_CPPFLAGS = \
-	-DPACKAGE_LOCALE_DIR=\""$(prefix)/$(DATADIRNAME)/locale"\" \
+	-DPACKAGE_LOCALE_DIR=\""$(datadir)/locale"\" \
 	-DPACKAGE_SRC_DIR=\""$(srcdir)"\" \
 	-DPACKAGE_DATA_DIR=\""$(datadir)"\" \
-	$(GHB_CFLAGS)
+	$(HB_CPPFLAGS)
 
 AM_CFLAGS = -Wall -g
 
@@ -64,8 +64,12 @@ bin_PROGRAMS = ghb
 nodist_EXTRA_ghb_SOURCES = dummy.cpp
 
 ghb_SOURCES = \
+	ghbcompat.c \
+	ghbcompat.h \
 	callbacks.c \
 	callbacks.h \
+	chapters.c \
+	chapters.h \
 	queuehandler.c \
 	queuehandler.h \
 	videohandler.c \
@@ -74,9 +78,11 @@ ghb_SOURCES = \
 	audiohandler.h \
 	subtitlehandler.c \
 	subtitlehandler.h \
-	x264handler.c \
-	x264handler.h \
 	main.c \
+	jobdict.c \
+	jobdict.h \
+	titledict.c \
+	titledict.h \
 	settings.c \
 	settings.h \
 	resources.c \
@@ -102,8 +108,6 @@ ghb_SOURCES = \
 	hb-backend.h \
 	renderer_button.h \
 	renderer_button.c \
-	ghbcellrenderertext.c \
-	ghbcellrenderertext.h \
 	ghb-dvd.c \
 	ghb-dvd.h \
 	marshalers.c \
@@ -117,7 +121,7 @@ ghb_LDFLAGS = \
 	-Wl,--export-dynamic -Wl,--exclude-libs,ALL
 endif
 
-ghb_LDADD = $(HB_LIBS) $(GHB_LIBS)
+ghb_LDADD = $(HB_LIBS)
 
 ghb_DEPENDENCIES = $(HB_DIR)/libhb/libhandbrake.a
 
@@ -140,27 +144,22 @@ data_res.h : data_res.gresource.xml $(srcdir)/internal_defaults.json widget.deps
 
 if GHB_GTK_4_00
 UI=400
+UI_FILE=ghb4.ui
 else
 if GHB_GTK_3_16
 UI=316
-else
-if GHB_GTK_3_14
-UI=314
-else
-if GHB_GTK_3_12
-UI=312
+UI_FILE=ghb3.ui
 else
 UI=300
-endif
-endif
+UI_FILE=ghb3.ui
 endif
 endif
 
-ui_res.c : ui_res.gresource.xml ui_res.h $(srcdir)/ghb.m4
+ui_res.c : ui_res.gresource.xml ui_res.h $(srcdir)/$(UI_FILE)
 	glib-compile-resources --generate --target=$@ --c-name ghb_ui --manual-register $<
 
-ui_res.h : ui_res.gresource.xml $(srcdir)/ghb.m4
-	m4 -Dgtk_version=$(UI) $(srcdir)/ghb.m4 > ghb.ui
+ui_res.h : ui_res.gresource.xml $(srcdir)/$(UI_FILE)
+	cp $(srcdir)/$(UI_FILE) ghb.ui
 	glib-compile-resources --generate --target=$@ --c-name ghb_ui --manual-register $<
 
 ui_res.o: ui_res.h ui_res.c
@@ -171,12 +170,13 @@ resources.o: data_res.h
 
 widget_reverse.deps: makedeps.py
 widget.deps: makedeps.py
-	python2 $(srcdir)/makedeps.py
+	$(HB_PYTHON) $(srcdir)/makedeps.py
 
-fr.handbrake.ghb.appdata.xml.in: fr.handbrake.ghb.appdata.xml.template
+fr.handbrake.ghb.metainfo.xml: fr.handbrake.ghb.metainfo.xml.in
+	$(AM_V_GEN) $(MSGFMT) --xml --template $< -d $(top_srcdir)/po -o $@
+
+fr.handbrake.ghb.metainfo.xml.in: fr.handbrake.ghb.metainfo.template.xml
 	sed -e 's^RELEASE_TAG^<release version="$(HB.version)" date="$(word 1,$(HB.repo.date))" />^' $< > $@
-
-ghbcellrenderertext.$(OBJEXT): marshalers.h
 
 $(srcdir)/marshalers.h: marshalers.list
 	glib-genmarshal --prefix=ghb_marshal $(srcdir)/marshalers.list --header > $(srcdir)/marshalers.h

@@ -1,6 +1,6 @@
 /* encx264.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -9,9 +9,9 @@
 
 #include <stdarg.h>
 
-#include "hb.h"
-#include "hb_dict.h"
-#include "encx264.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/hb_dict.h"
+#include "handbrake/encx264.h"
 
 int  encx264Init( hb_work_object_t *, hb_job_t * );
 int  encx264Work( hb_work_object_t *, hb_buffer_t **, hb_buffer_t ** );
@@ -389,9 +389,9 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
 
     /* set up the VUI color model & gamma to match what the COLR atom
      * set in muxmp4.c says. See libhb/muxmp4.c for notes. */
-    param.vui.i_colorprim = job->color_prim;
-    param.vui.i_transfer  = job->color_transfer;
-    param.vui.i_colmatrix = job->color_matrix;
+    param.vui.i_colorprim = hb_output_color_prim(job);
+    param.vui.i_transfer  = hb_output_color_transfer(job);
+    param.vui.i_colmatrix = hb_output_color_matrix(job);
 
     /* place job->encoder_options in an hb_dict_t for convenience */
     hb_dict_t * x264_opts = NULL;
@@ -425,9 +425,9 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
 
     /* Reload colorimetry settings in case custom values were set
      * in the encoder_options string */
-    job->color_prim = param.vui.i_colorprim;
-    job->color_transfer = param.vui.i_transfer;
-    job->color_matrix = param.vui.i_colmatrix;
+    job->color_prim_override     = param.vui.i_colorprim;
+    job->color_transfer_override = param.vui.i_transfer;
+    job->color_matrix_override   = param.vui.i_colmatrix;
 
     /* For 25 fps sources, HandBrake's explicit keyints will match the x264 defaults:
      * min-keyint 25 (same as auto), keyint 250. */
@@ -441,12 +441,12 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
             min_auto = param.i_keyint_max / 10;
 
         char min[40], max[40];
-        param.i_keyint_min == X264_KEYINT_MIN_AUTO ? 
-            snprintf( min, 40, "auto (%d)", min_auto ) : 
+        param.i_keyint_min == X264_KEYINT_MIN_AUTO ?
+            snprintf( min, 40, "auto (%d)", min_auto ) :
             snprintf( min, 40, "%d", param.i_keyint_min );
 
-        param.i_keyint_max == X264_KEYINT_MAX_INFINITE ? 
-            snprintf( max, 40, "infinite" ) : 
+        param.i_keyint_max == X264_KEYINT_MAX_INFINITE ?
+            snprintf( max, 40, "infinite" ) :
             snprintf( max, 40, "%d", param.i_keyint_max );
 
         hb_log( "encx264: min-keyint: %s, keyint: %s", min, max );
@@ -526,7 +526,7 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
 
     /* B-pyramid is enabled by default. */
     job->areBframes = 2;
-    
+
     if( !param.i_bframe )
     {
         job->areBframes = 0;
@@ -535,7 +535,7 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     {
         job->areBframes = 1;
     }
-    
+
     /* Log the unparsed x264 options string. */
     char *x264_opts_unparsed = hb_x264_param_unparse(pv->api->bit_depth,
                                                      job->encoder_preset,

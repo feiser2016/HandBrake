@@ -13,10 +13,11 @@
 #import "HBMutablePreset.h"
 
 #import "HBCodingUtilities.h"
+#import "HBLocalizationUtilities.h"
 #import "HBUtilities.h"
 #import "HBSecurityAccessToken.h"
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 
 NSString *HBContainerChangedNotification = @"HBContainerChangedNotification";
 NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
@@ -38,13 +39,11 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
 @property (nonatomic, readwrite) HBSecurityAccessToken *fileURLToken;
 @property (nonatomic, readwrite) HBSecurityAccessToken *outputURLToken;
 @property (nonatomic, readwrite) HBSecurityAccessToken *subtitlesToken;
-@property (nonatomic, readwrite) NSInteger *accessCount;
+@property (nonatomic, readwrite) NSInteger accessCount;
 
 @end
 
 @implementation HBJob
-
-@synthesize uuid = _uuid;
 
 - (instancetype)initWithTitle:(HBTitle *)title andPreset:(HBPreset *)preset
 {
@@ -72,10 +71,7 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
 
         _chapterTitles = [title.chapters copy];
 
-        CFUUIDRef theUUID = CFUUIDCreate(NULL);
-        CFStringRef string = CFUUIDCreateString(NULL, theUUID);
-        CFRelease(theUUID);
-        _uuid = CFBridgingRelease(string);
+        _presetName = @"";
 
         [self applyPreset:preset];
     }
@@ -178,11 +174,30 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
         {
             if (outError)
             {
-                *outError = [NSError errorWithDomain:@"HBError" code:0 userInfo:@{NSLocalizedDescriptionKey: NSLocalizedString(@"Invalid name", @"HBJob -> invalid name error description"),
-                                                                                  NSLocalizedRecoverySuggestionErrorKey: NSLocalizedString(@"The file name can't contain the / character.", @"HBJob -> invalid name error recovery suggestion")}];
+                *outError = [NSError errorWithDomain:@"HBError" code:0 userInfo:@{NSLocalizedDescriptionKey: HBKitLocalizedString(@"Invalid name", @"HBJob -> invalid name error description"),
+                                                                                  NSLocalizedRecoverySuggestionErrorKey: HBKitLocalizedString(@"The file name can't contain the / character.", @"HBJob -> invalid name error recovery suggestion")}];
             }
             return NO;
         }
+        if (value.length == 0)
+        {
+            if (outError)
+            {
+                *outError = [NSError errorWithDomain:@"HBError" code:0 userInfo:@{NSLocalizedDescriptionKey: HBKitLocalizedString(@"Invalid name", @"HBJob -> invalid name error description"),
+                                                                                  NSLocalizedRecoverySuggestionErrorKey: HBKitLocalizedString(@"The file name can't be empty.", @"HBJob -> invalid name error recovery suggestion")}];
+            }
+            return NO;
+        }
+    }
+
+    if (*ioValue == nil)
+    {
+        if (outError)
+        {
+            *outError = [NSError errorWithDomain:@"HBError" code:0 userInfo:@{NSLocalizedDescriptionKey: HBKitLocalizedString(@"Invalid name", @"HBJob -> invalid name error description"),
+                                                                              NSLocalizedRecoverySuggestionErrorKey: HBKitLocalizedString(@"The file name can't be empty.", @"HBJob -> invalid name error recovery suggestion")}];
+        }
+        return NO;
     }
 
     return retval;
@@ -273,6 +288,27 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
     return self.name;
 }
 
+- (void)refreshSecurityScopedResources
+{
+    if (_fileURLBookmark)
+    {
+        NSURL *resolvedURL = [HBUtilities URLFromBookmark:_fileURLBookmark];
+        if (resolvedURL)
+        {
+            _fileURL = resolvedURL;
+        }
+    }
+    if (_outputURLFolderBookmark)
+    {
+        NSURL *resolvedURL = [HBUtilities URLFromBookmark:_outputURLFolderBookmark];
+        if (resolvedURL)
+        {
+            _outputURL = resolvedURL;
+        }
+    }
+    [self.subtitles refreshSecurityScopedResources];
+}
+
 - (BOOL)startAccessingSecurityScopedResource
 {
 #ifdef __SANDBOX_ENABLED__
@@ -311,15 +347,9 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
 
     if (copy)
     {
-        copy->_state = HBJobStateReady;
         copy->_name = [_name copy];
         copy->_presetName = [_presetName copy];
         copy->_titleIdx = _titleIdx;
-
-        CFUUIDRef theUUID = CFUUIDCreate(NULL);
-        CFStringRef string = CFUUIDCreateString(NULL, theUUID);
-        CFRelease(theUUID);
-        copy->_uuid = CFBridgingRelease(string);
 
         copy->_fileURLBookmark = [_fileURLBookmark copy];
         copy->_outputURLFolderBookmark = [_outputURLFolderBookmark copy];
@@ -362,13 +392,11 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
 
 - (void)encodeWithCoder:(NSCoder *)coder
 {
-    [coder encodeInt:3 forKey:@"HBJobVersion"];
+    [coder encodeInt:5 forKey:@"HBJobVersion"];
 
-    encodeInt(_state);
     encodeObject(_name);
     encodeObject(_presetName);
     encodeInt(_titleIdx);
-    encodeObject(_uuid);
 
 #ifdef __SANDBOX_ENABLED__
     if (!_fileURLBookmark)
@@ -417,46 +445,22 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
 {
     int version = [decoder decodeIntForKey:@"HBJobVersion"];
 
-    if (version == 3 && (self = [super init]))
+    if (version == 5 && (self = [super init]))
     {
-        decodeInt(_state);
         decodeObjectOrFail(_name, NSString);
         decodeObjectOrFail(_presetName, NSString);
-        decodeInt(_titleIdx);
-        decodeObjectOrFail(_uuid, NSString);
+        decodeInt(_titleIdx); if (_titleIdx < 0) { goto fail; }
 
 #ifdef __SANDBOX_ENABLED__
-        _fileURLBookmark = [decoder decodeObjectOfClass:[NSData class] forKey:@"_fileURLBookmark"];
-
-        if (_fileURLBookmark)
-        {
-            _fileURL = [HBUtilities URLFromBookmark:_fileURLBookmark];
-        }
-
-        if (!_fileURL)
-        {
-            decodeObjectOrFail(_fileURL, NSURL);
-        }
-
-        _outputURLFolderBookmark = [decoder decodeObjectOfClass:[NSData class] forKey:@"_outputURLFolderBookmark"];
-
-        if (_outputURLFolderBookmark)
-        {
-            _outputURL = [HBUtilities URLFromBookmark:_outputURLFolderBookmark];
-        }
-        else
-        {
-            decodeObject(_outputURL, NSURL);
-        }
-#else
+        decodeObject(_fileURLBookmark, NSData)
+        decodeObject(_outputURLFolderBookmark, NSData)
+#endif
         decodeObjectOrFail(_fileURL, NSURL);
         decodeObject(_outputURL, NSURL);
-#endif
-
         decodeObject(_outputFileName, NSString);
 
-        decodeInt(_container);
-        decodeInt(_angle);
+        decodeInt(_container); if (_container != HB_MUX_MP4 && _container != HB_MUX_MKV && _container != HB_MUX_WEBM) { goto fail; }
+        decodeInt(_angle); if (_angle < 0) { goto fail; }
         decodeBool(_mp4HttpOptimize);
         decodeBool(_mp4iPodCompatible);
         decodeBool(_alignAVStart);
@@ -475,7 +479,7 @@ NSString *HBChaptersChangedNotification  = @"HBChaptersChangedNotification";
         _video.job = self;
 
         decodeBool(_chaptersEnabled);
-        decodeCollectionOfObjects(_chapterTitles, NSArray, HBChapter);
+        decodeCollectionOfObjectsOrFail(_chapterTitles, NSArray, HBChapter);
 
         return self;
     }

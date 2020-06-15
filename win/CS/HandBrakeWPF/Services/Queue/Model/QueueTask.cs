@@ -9,6 +9,9 @@
 
 namespace HandBrakeWPF.Services.Queue.Model
 {
+    using System;
+    using System.Runtime.CompilerServices;
+
     using Caliburn.Micro;
 
     using HandBrake.Interop.Model;
@@ -16,46 +19,26 @@ namespace HandBrakeWPF.Services.Queue.Model
     using HandBrakeWPF.Services.Presets.Model;
     using HandBrakeWPF.Utilities;
 
+    using Newtonsoft.Json;
+
     using EncodeTask = HandBrakeWPF.Services.Encode.Model.EncodeTask;
 
-    /// <summary>
-    /// The QueueTask.
-    /// </summary>
     public class QueueTask : PropertyChangedBase
     {
         private static int id;
         private QueueItemStatus status;
         private string presetKey;
 
-        #region Properties
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="QueueTask"/> class.
-        /// </summary>
         public QueueTask()
         {
             this.Status = QueueItemStatus.Waiting;
             id = id + 1;
             this.Id = string.Format("{0}.{1}", GeneralUtilities.ProcessId, id);
             this.Statistics = new QueueStats();
+            this.JobProgress = new QueueProgressStatus();
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="QueueTask"/> class.
-        /// </summary>
-        /// <param name="task">
-        /// The task.
-        /// </param>
-        /// <param name="configuration">
-        /// The configuration.
-        /// </param>
-        /// <param name="scannedSourcePath">
-        /// The scanned Source Path.
-        /// </param>
-        /// <param name="currentPreset">
-        /// The currently active preset.
-        /// </param>
-        public QueueTask(EncodeTask task, HBConfiguration configuration, string scannedSourcePath, Preset currentPreset)
+        public QueueTask(EncodeTask task, HBConfiguration configuration, string scannedSourcePath, Preset currentPreset, bool isPresetModified)
         {
             this.Task = task;
             this.Configuration = configuration;
@@ -64,24 +47,30 @@ namespace HandBrakeWPF.Services.Queue.Model
             if (currentPreset != null)
             {
                 this.presetKey = currentPreset.Name;
+                if (isPresetModified)
+                {
+                    this.presetKey = this.presetKey + " (Modified)";
+                }
             }
 
             id = id + 1;
             this.Id = string.Format("{0}.{1}", GeneralUtilities.ProcessId, id);
 
             this.Statistics = new QueueStats();
+            this.TaskId = Guid.NewGuid().ToString();
+            this.JobProgress = new QueueProgressStatus();
         }
 
+        [JsonProperty]
+        public string TaskId { get; set; }
+
+        [JsonIgnore]
         public string Id { get; }
 
-        /// <summary>
-        /// Gets or sets ScannedSource.
-        /// </summary>
+        [JsonProperty]
         public string ScannedSourcePath { get; set; }
 
-        /// <summary>
-        /// Gets or sets Status.
-        /// </summary>
+        [JsonProperty]
         public QueueItemStatus Status
         {
             get
@@ -93,21 +82,27 @@ namespace HandBrakeWPF.Services.Queue.Model
             {
                 this.status = value;
                 this.NotifyOfPropertyChange(() => this.Status);
+                this.NotifyOfPropertyChange(() => this.ShowEncodeProgress);
+                this.NotifyOfPropertyChange(() => this.IsJobStatusVisible);
             }
         }
 
-        /// <summary>
-        /// Gets or sets the task.
-        /// </summary>
+        [JsonProperty]
         public EncodeTask Task { get; set; }
 
-        /// <summary>
-        /// Gets or sets the configuration.
-        /// </summary>
+        [JsonProperty]
         public HBConfiguration Configuration { get; set; }
 
+        [JsonProperty]
         public QueueStats Statistics { get; set; }
 
+        [JsonIgnore]
+        public QueueProgressStatus JobProgress { get; set; }
+
+        [JsonIgnore]
+        public bool IsJobStatusVisible => this.Status == QueueItemStatus.InProgress;
+        
+        [JsonIgnore]
         public string SelectedPresetKey
         {
             get
@@ -116,12 +111,8 @@ namespace HandBrakeWPF.Services.Queue.Model
             }
         }
 
-        #endregion
-
-        protected bool Equals(QueueTask other)
-        {
-            return this.Id == other.Id;
-        }
+        [JsonIgnore]
+        public bool ShowEncodeProgress => this.Status == QueueItemStatus.InProgress && SystemInfo.IsWindows10();
 
         public override bool Equals(object obj)
         {
@@ -134,6 +125,16 @@ namespace HandBrakeWPF.Services.Queue.Model
         public override int GetHashCode()
         {
             return this.Id.GetHashCode();
+        }
+
+        public override string ToString()
+        {
+            return string.Format("Encode Task.  Title: {0}, Source: {1}, Destination: {2}", this.Task.Title, this.Task.Source, this.Task.Destination);
+        }
+
+        protected bool Equals(QueueTask other)
+        {
+            return this.Id == other.Id;
         }
     }
 }

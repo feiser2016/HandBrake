@@ -1,16 +1,19 @@
 /* encx265.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
-#ifdef USE_X265
 
-#include "hb.h"
-#include "hb_dict.h"
-#include "h265_common.h"
+#include "handbrake/project.h"
+
+#if HB_PROJECT_FEATURE_X265
+
+#include "handbrake/handbrake.h"
+#include "handbrake/hb_dict.h"
+#include "handbrake/h265_common.h"
 #include "x265.h"
 
 int  encx265Init (hb_work_object_t*, hb_job_t*);
@@ -76,6 +79,31 @@ static int param_parse(hb_work_private_t *pv, x265_param *param,
         break;
     }
     return ret;
+}
+
+int apply_h265_level(hb_work_private_t *pv,  x265_param *param,
+                     const char *h265_level)
+{
+    if (h265_level == NULL ||
+        !strcasecmp(h265_level, hb_h265_level_names[0]))
+    {
+        return 0;
+    }
+    // Verify that level is valid
+    int i;
+    for (i = 1; hb_h265_level_values[i]; i++)
+    {
+        if (!strcmp(hb_h265_level_names[i], h265_level) ||
+            !strcmp(hb_h265_level_names2[i], h265_level))
+        {
+            return param_parse(pv, param, "level-idc",
+                    hb_h265_level_names2[i]);
+        }
+    }
+
+    // error (invalid or unsupported level), abort
+    hb_error("apply_h265_level: invalid level %s", h265_level);
+    return X265_PARAM_BAD_VALUE;
 }
 
 /***********************************************************************
@@ -155,9 +183,9 @@ int encx265Init(hb_work_object_t *w, hb_job_t *job)
      * flags, if any, should be set in the x265_param struct).
      */
     char colorprim[11], transfer[11], colormatrix[11];
-    snprintf(colorprim,   sizeof(colorprim),   "%d", job->color_prim);
-    snprintf(transfer,    sizeof(transfer),    "%d", job->color_transfer);
-    snprintf(colormatrix, sizeof(colormatrix), "%d", job->color_matrix);
+    snprintf(colorprim,   sizeof(colorprim),   "%d", hb_output_color_prim(job));
+    snprintf(transfer,    sizeof(transfer),    "%d", hb_output_color_transfer(job));
+    snprintf(colormatrix, sizeof(colormatrix), "%d", hb_output_color_matrix(job));
 
     if (param_parse(pv, param, "colorprim",   colorprim)   ||
         param_parse(pv, param, "transfer",    transfer)    ||
@@ -190,9 +218,9 @@ int encx265Init(hb_work_object_t *w, hb_job_t *job)
      * Reload colorimetry settings in case custom
      * values were set in the encoder_options string.
      */
-    job->color_prim        = param->vui.colorPrimaries;
-    job->color_transfer    = param->vui.transferCharacteristics;
-    job->color_matrix      = param->vui.matrixCoeffs;
+    job->color_prim_override     = param->vui.colorPrimaries;
+    job->color_transfer_override = param->vui.transferCharacteristics;
+    job->color_matrix_override   = param->vui.matrixCoeffs;
 
     /*
      * Settings which can't be overridden in the encodeer_options string
@@ -267,6 +295,10 @@ int encx265Init(hb_work_object_t *w, hb_job_t *job)
     if (job->encoder_profile                                      != NULL &&
         strcasecmp(job->encoder_profile, profile_names[0])        != 0    &&
         pv->api->param_apply_profile(param, job->encoder_profile) < 0)
+    {
+        goto fail;
+    }
+    if (apply_h265_level(pv, param, job->encoder_level) < 0)
     {
         goto fail;
     }

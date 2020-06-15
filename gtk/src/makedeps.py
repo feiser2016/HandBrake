@@ -26,6 +26,9 @@ dep_map = (
     DepEntry("PictureDeinterlaceFilter", "PictureDeinterlacePresetLabel", "off", True, True),
     DepEntry("PictureDeinterlaceFilter", "PictureDeinterlaceCustom", "off", True, True),
     DepEntry("PictureDeinterlacePreset", "PictureDeinterlaceCustom", "custom", False, True),
+    DepEntry("PictureDeblockPreset", "PictureDeblockTune", "off|custom", True, True),
+    DepEntry("PictureDeblockPreset", "PictureDeblockTuneLabel", "off|custom", True, True),
+    DepEntry("PictureDeblockPreset", "PictureDeblockCustom", "custom", False, True),
     DepEntry("PictureDenoiseFilter", "PictureDenoisePreset", "off", True, True),
     DepEntry("PictureDenoiseFilter", "PictureDenoisePresetLabel", "off", True, True),
     DepEntry("PictureDenoiseFilter", "PictureDenoiseTune", "nlmeans", False, True),
@@ -50,20 +53,9 @@ dep_map = (
     DepEntry("PictureAutoCrop", "PictureBottomCrop", "0", False, False),
     DepEntry("PictureAutoCrop", "PictureLeftCrop", "0", False, False),
     DepEntry("PictureAutoCrop", "PictureRightCrop", "0", False, False),
-    DepEntry("x264_bframes", "x264_bpyramid", "<2", True, False),
-    DepEntry("x264_bframes", "x264_direct", "0", True, False),
-    DepEntry("x264_bframes", "x264_b_adapt", "0", True, False),
-    DepEntry("x264_subme", "x264_psy_rd", "<6", True, False),
-    DepEntry("x264_subme", "x264_psy_trell", "<6", True, False),
-    DepEntry("x264_trellis", "x264_psy_trell", "0", True, False),
     DepEntry("VideoEncoder", "x264FastDecode", "x264|x264_10bit", False, True),
-    DepEntry("VideoEncoder", "x264UseAdvancedOptions", "x264|x264_10bit", False, True),
-    DepEntry("HideAdvancedVideoSettings", "x264UseAdvancedOptions", "1", True, True),
     DepEntry("VideoEncoder", "VideoOptionExtraWindow", "x264|x264_10bit|x265|x265_10bit|x265_12bit|x265_16bit|mpeg4|mpeg2|VP8|VP9", False, True),
     DepEntry("VideoEncoder", "VideoOptionExtraLabel", "x264|x264_10bit|x265|x265_10bit|x265_12bit|x265_16bit|mpeg4|mpeg2|VP8|VP9", False, True),
-    DepEntry("x264UseAdvancedOptions", "VideoSettingsTable", "1", True, False),
-    DepEntry("VideoEncoder", "x264_box", "x264|x264_10bit", False, True),
-    DepEntry("x264UseAdvancedOptions", "x264_box", "0", True, False),
     DepEntry("auto_name", "autoname_box", "1", False, False),
     DepEntry("PresetCategory", "PresetCategoryName", "new", False, True),
     DepEntry("PresetCategory", "PresetCategoryEntryLabel", "new", False, True),
@@ -73,13 +65,13 @@ def main():
 
     try:
         depsfile = open("widget.deps", "w")
-    except Exception, err:
+    except Exception as err:
         print >> sys.stderr, ( "Error: %s"  % str(err) )
         sys.exit(1)
 
     try:
         revfile = open("widget_reverse.deps", "w")
-    except Exception, err:
+    except Exception as err:
         print >> sys.stderr, ( "Error: %s"  % str(err))
         sys.exit(1)
 

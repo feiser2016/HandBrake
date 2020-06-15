@@ -14,9 +14,10 @@
 #import "HBAudioDefaults.h"
 
 #import "HBCodingUtilities.h"
+#import "HBLocalizationUtilities.h"
 #import "HBJob+Private.h"
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 
 #define NONE_TRACK_INDEX 0
 
@@ -42,9 +43,9 @@ NSString *HBAudioEncoderChangedNotification = @"HBAudioEncoderChangedNotificatio
         _tracks = [[NSMutableArray alloc] init];
         _defaults = [[HBAudioDefaults alloc] init];
 
-        // Add the none and foreign track to the source array
-        NSMutableArray *sourceTracks = [job.title.audioTracks mutableCopy];
-        NSDictionary *none = @{keyAudioTrackName: NSLocalizedString(@"None", @"HBAudio -> none track name")};
+        // Add the none track to the source array
+        NSMutableArray<HBTitleAudioTrack *> *sourceTracks = [job.title.audioTracks mutableCopy];
+        HBTitleAudioTrack *none = [[HBTitleAudioTrack alloc] initWithDisplayName:HBKitLocalizedString(@"None", @"HBAudio -> none track name")];
         [sourceTracks insertObject:none atIndex:0];
         _sourceTracks = [sourceTracks copy];
     }
@@ -53,18 +54,18 @@ NSString *HBAudioEncoderChangedNotification = @"HBAudioEncoderChangedNotificatio
 
 #pragma mark - Data Source
 
-- (NSDictionary<NSString *, id> *)sourceTrackAtIndex:(NSUInteger)idx;
+- (HBTitleAudioTrack *)sourceTrackAtIndex:(NSUInteger)idx
 {
     return self.sourceTracks[idx];
 }
 
 - (NSArray<NSString *> *)sourceTracksArray
 {
-    NSMutableArray *sourceNames = [NSMutableArray array];
+    NSMutableArray<NSString *> *sourceNames = [NSMutableArray array];
 
-    for (NSDictionary *track in self.sourceTracks)
+    for (HBTitleAudioTrack *track in self.sourceTracks)
     {
-        [sourceNames addObject:track[keyAudioTrackName]];
+        [sourceNames addObject:track.displayName];
     }
 
     return sourceNames;
@@ -72,7 +73,7 @@ NSString *HBAudioEncoderChangedNotification = @"HBAudioEncoderChangedNotificatio
 
 #pragma mark - Delegate
 
-- (void)track:(HBAudioTrack *)track didChangeSourceFrom:(NSUInteger)oldSourceIdx;
+- (void)track:(HBAudioTrack *)track didChangeSourceFrom:(NSUInteger)oldSourceIdx
 {
     // If the source was changed to None, remove the track
     if (track.sourceTrackIdx == NONE_TRACK_INDEX)
@@ -99,8 +100,9 @@ NSString *HBAudioEncoderChangedNotification = @"HBAudioEncoderChangedNotificatio
 {
     [self removeTracksAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.tracks.count)]];
 
-    // Add the remainings tracks
-    for (NSUInteger idx = 1; idx < self.sourceTracksArray.count; idx++) {
+    // Add the remaining tracks
+    for (NSUInteger idx = 1; idx < self.sourceTracksArray.count; idx++)
+    {
         [self addTrack:[self trackFromSourceTrackIndex:idx]];
     }
 
@@ -276,9 +278,10 @@ NSString *HBAudioEncoderChangedNotification = @"HBAudioEncoderChangedNotificatio
 {
     self = [super init];
 
-    decodeInt(_container);
-    decodeCollectionOfObjects(_sourceTracks, NSArray, NSDictionary);
-    decodeCollectionOfObjects(_tracks, NSMutableArray, HBAudioTrack);
+    decodeInt(_container); if (_container != HB_MUX_MP4 && _container != HB_MUX_MKV && _container != HB_MUX_WEBM) { goto fail; }
+    decodeCollectionOfObjectsOrFail(_sourceTracks, NSArray, HBTitleAudioTrack);
+    if (_sourceTracks.count < 1) { goto fail; }
+    decodeCollectionOfObjectsOrFail(_tracks, NSMutableArray, HBAudioTrack);
 
     for (HBAudioTrack *track in _tracks)
     {
@@ -320,7 +323,7 @@ fail:
     return self.tracks[index];
 }
 
-- (void)insertObject:(HBAudioTrack *)track inTracksAtIndex:(NSUInteger)index;
+- (void)insertObject:(HBAudioTrack *)track inTracksAtIndex:(NSUInteger)index
 {
     [[self.undo prepareWithInvocationTarget:self] removeObjectFromTracksAtIndex:index];
     [self.tracks insertObject:track atIndex:index];

@@ -118,10 +118,9 @@ namespace HandBrake.Interop.Interop.Json.Presets
         /// </summary>
         public int PictureDARWidth { get; set; }
 
-        /// <summary>
-        /// Gets or sets the picture deblock.
-        /// </summary>
-        public int PictureDeblock { get; set; }
+        public string PictureDeblockPreset { get; set; }
+        public string PictureDeblockTune { get; set; }
+        public string PictureDeblockCustom { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether picture decomb deinterlace.
@@ -169,8 +168,11 @@ namespace HandBrake.Interop.Interop.Json.Presets
         public string PictureDenoiseTune { get; set; }
 
         public string PictureSharpenCustom { get; set; }
+
         public string PictureSharpenFilter { get; set; }
+
         public string PictureSharpenPreset { get; set; }
+
         public string PictureSharpenTune { get; set; }
 
         /// <summary>

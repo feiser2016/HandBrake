@@ -1,12 +1,12 @@
 /* reader.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
-#include "hb.h"
+#include "handbrake/handbrake.h"
 
 static int  reader_init( hb_work_object_t * w, hb_job_t * job );
 static void reader_close( hb_work_object_t * w );
@@ -432,8 +432,10 @@ static void reader_send_eof( hb_work_private_t * r )
     hb_subtitle_t *subtitle;
     for (ii = 0; (subtitle = hb_list_item(r->job->list_subtitle, ii)); ++ii)
     {
-        if (subtitle->fifo_in && subtitle->source != SRTSUB)
+        if (subtitle->fifo_in)
+        {
             push_buf(r, subtitle->fifo_in, hb_buffer_eof_init());
+        }
     }
     hb_log("reader: done. %d scr changes", r->demux.scr_changes);
 }
@@ -634,6 +636,7 @@ static void UpdateState( hb_work_private_t  * r )
         {
             eta = 0;
         }
+        p.eta_seconds = eta;
         p.hours   = eta / 3600;
         p.minutes = ( eta % 3600 ) / 60;
         p.seconds = eta % 60;

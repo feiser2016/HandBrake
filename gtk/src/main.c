@@ -1,14 +1,13 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * main.c
- * Copyright (C) John Stebbins 2008-2018 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2020 <stebbins@stebbins>
  *
  * main.c is free software.
  *
  * You may redistribute it and/or modify it under the terms of the
- * GNU General Public License, as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option)
- * any later version.
+ * GNU General Public License version 2, as published by the Free Software
+ * Foundation.
  *
  * main.c is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -47,18 +46,16 @@
 #include <glib/gstdio.h>
 #include <glib/gi18n.h>
 #include <gio/gio.h>
-#include "hb.h"
+#include "handbrake/handbrake.h"
 #include "renderer_button.h"
 #include "hb-backend.h"
 #include "ghb-dvd.h"
-#include "ghbcellrenderertext.h"
 #include "values.h"
 #include "icons.h"
 #include "callbacks.h"
 #include "queuehandler.h"
 #include "audiohandler.h"
 #include "subtitlehandler.h"
-#include "x264handler.h"
 #include "settings.h"
 #include "resources.h"
 #include "presets.h"
@@ -200,114 +197,6 @@ change_font(GtkWidget *widget, gpointer data)
     //gtk_container_foreach((GtkContainer*)window, change_font, "sans 20");
 #endif
 
-extern G_MODULE_EXPORT void chapter_edited_cb(void);
-extern G_MODULE_EXPORT void chapter_keypress_cb(void);
-
-// Create and bind the tree model to the tree view for the chapter list
-// Also, connect up the signal that lets us know the selection has changed
-static void
-bind_chapter_tree_model(signal_user_data_t *ud)
-{
-    GtkCellRenderer *cell;
-    GtkTreeViewColumn *column;
-    GtkListStore *treestore;
-    GtkTreeView  *treeview;
-
-    g_debug("bind_chapter_tree_model()\n");
-    treeview = GTK_TREE_VIEW(GHB_WIDGET(ud->builder, "chapters_list"));
-    treestore = gtk_list_store_new(5, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_BOOLEAN);
-    gtk_tree_view_set_model(treeview, GTK_TREE_MODEL(treestore));
-
-    cell = ghb_cell_renderer_text_new();
-    column = gtk_tree_view_column_new_with_attributes(
-                                    _("Index"), cell, "text", 0, NULL);
-    gtk_tree_view_append_column(treeview, GTK_TREE_VIEW_COLUMN(column));
-
-    cell = ghb_cell_renderer_text_new();
-    column = gtk_tree_view_column_new_with_attributes(
-                                    _("Start"), cell, "text", 1, NULL);
-    gtk_tree_view_append_column(treeview, GTK_TREE_VIEW_COLUMN(column));
-
-    cell = ghb_cell_renderer_text_new();
-    column = gtk_tree_view_column_new_with_attributes(
-                                    _("Duration"), cell, "text", 2, NULL);
-    gtk_tree_view_append_column(treeview, GTK_TREE_VIEW_COLUMN(column));
-
-    cell = ghb_cell_renderer_text_new();
-    column = gtk_tree_view_column_new_with_attributes(
-                    _("Title"), cell, "text", 3, "editable", 4, NULL);
-    gtk_tree_view_append_column(treeview, GTK_TREE_VIEW_COLUMN(column));
-
-    g_signal_connect(cell, "key-press-event", chapter_keypress_cb, ud);
-    g_signal_connect(cell, "edited", chapter_edited_cb, ud);
-    g_debug("Done\n");
-}
-
-
-extern G_MODULE_EXPORT void queue_list_selection_changed_cb(void);
-extern G_MODULE_EXPORT void queue_remove_clicked_cb(void);
-extern G_MODULE_EXPORT void queue_list_size_allocate_cb(void);
-extern G_MODULE_EXPORT void queue_drag_cb(void);
-extern G_MODULE_EXPORT void queue_drag_motion_cb(void);
-
-// Create and bind the tree model to the tree view for the queue list
-// Also, connect up the signal that lets us know the selection has changed
-static void
-bind_queue_tree_model(signal_user_data_t *ud)
-{
-    GtkCellRenderer *cell, *textcell;
-    GtkTreeViewColumn *column;
-    GtkTreeStore *treestore;
-    GtkTreeView  *treeview;
-    GtkTreeSelection *selection;
-    GtkTargetEntry SrcEntry;
-    SrcEntry.target = "DATA";
-    SrcEntry.flags = GTK_TARGET_SAME_WIDGET;
-
-    g_debug("bind_queue_tree_model()\n");
-    treeview = GTK_TREE_VIEW(GHB_WIDGET(ud->builder, "queue_list"));
-    selection = gtk_tree_view_get_selection(treeview);
-    treestore = gtk_tree_store_new(5, G_TYPE_BOOLEAN, G_TYPE_STRING,
-                                      G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT);
-    gtk_tree_view_set_model(treeview, GTK_TREE_MODEL(treestore));
-
-    column = gtk_tree_view_column_new();
-    gtk_tree_view_column_set_title(column, _("Job Information"));
-    cell = gtk_cell_renderer_spinner_new();
-    gtk_tree_view_column_pack_start(column, cell, FALSE);
-    gtk_tree_view_column_add_attribute(column, cell, "active", 0);
-    gtk_tree_view_column_add_attribute(column, cell, "pulse", 4);
-    cell = gtk_cell_renderer_pixbuf_new();
-    gtk_tree_view_column_pack_start(column, cell, FALSE);
-    gtk_tree_view_column_add_attribute(column, cell, "icon-name", 1);
-    textcell = gtk_cell_renderer_text_new();
-    g_object_set(textcell, "wrap-mode", PANGO_WRAP_CHAR, NULL);
-    g_object_set(textcell, "wrap-width", 500, NULL);
-    gtk_tree_view_column_pack_start(column, textcell, TRUE);
-    gtk_tree_view_column_add_attribute(column, textcell, "markup", 2);
-    gtk_tree_view_append_column(treeview, GTK_TREE_VIEW_COLUMN(column));
-    gtk_tree_view_column_set_expand(column, TRUE);
-    gtk_tree_view_column_set_max_width(column, 550);
-    g_signal_connect(treeview, "size-allocate", queue_list_size_allocate_cb,
-                        textcell);
-
-    cell = custom_cell_renderer_button_new();
-    column = gtk_tree_view_column_new_with_attributes(
-                                    _(""), cell, "icon-name", 3, NULL);
-    gtk_tree_view_column_set_min_width(column, 24);
-    gtk_tree_view_append_column(treeview, GTK_TREE_VIEW_COLUMN(column));
-
-    gtk_tree_view_enable_model_drag_dest(treeview, &SrcEntry, 1,
-                                            GDK_ACTION_MOVE);
-    gtk_tree_view_enable_model_drag_source(treeview, GDK_BUTTON1_MASK,
-                                            &SrcEntry, 1, GDK_ACTION_MOVE);
-
-    g_signal_connect(selection, "changed", queue_list_selection_changed_cb, ud);
-    g_signal_connect(cell, "clicked", queue_remove_clicked_cb, ud);
-    g_signal_connect(treeview, "drag_data_received", queue_drag_cb, ud);
-    g_signal_connect(treeview, "drag_motion", queue_drag_motion_cb, ud);
-}
-
 extern G_MODULE_EXPORT void audio_list_selection_changed_cb(void);
 extern G_MODULE_EXPORT void audio_edit_clicked_cb(void);
 extern G_MODULE_EXPORT void audio_remove_clicked_cb(void);
@@ -435,10 +324,20 @@ bind_subtitle_tree_model(signal_user_data_t *ud)
 }
 
 extern G_MODULE_EXPORT void presets_list_selection_changed_cb(void);
-extern G_MODULE_EXPORT void presets_drag_cb(void);
+extern G_MODULE_EXPORT void presets_drag_data_received_cb(void);
 extern G_MODULE_EXPORT void presets_drag_motion_cb(void);
 extern G_MODULE_EXPORT void preset_edited_cb(void);
 extern void presets_row_expanded_cb(void);
+
+#if GTK_CHECK_VERSION(3, 90, 0)
+static const char * presets_drag_entries[] = {
+    "widget/presets-list-row-drop"
+};
+#else
+static GtkTargetEntry presets_drag_entries[] = {
+   { "PRESETS_ROW", GTK_TARGET_SAME_WIDGET, 0 }
+};
+#endif
 
 // Create and bind the tree model to the tree view for the preset list
 // Also, connect up the signal that lets us know the selection has changed
@@ -451,9 +350,6 @@ bind_presets_tree_model(signal_user_data_t *ud)
     GtkTreeView  *treeview;
     GtkTreeSelection *selection;
     GtkWidget *widget;
-    GtkTargetEntry SrcEntry;
-    SrcEntry.target = "DATA";
-    SrcEntry.flags = GTK_TARGET_SAME_WIDGET;
 
     g_debug("bind_presets_tree_model()\n");
     treeview = GTK_TREE_VIEW(GHB_WIDGET(ud->builder, "presets_list"));
@@ -473,12 +369,24 @@ bind_presets_tree_model(signal_user_data_t *ud)
     gtk_tree_view_column_set_expand(column, TRUE);
     gtk_tree_view_set_tooltip_column(treeview, 4);
 
-    gtk_tree_view_enable_model_drag_dest(treeview, &SrcEntry, 1,
+#if GTK_CHECK_VERSION(3, 90, 0)
+    GdkContentFormats * targets;
+
+    targets = gdk_content_formats_new(presets_drag_entries,
+                                      G_N_ELEMENTS(presets_drag_entries));
+    gtk_tree_view_enable_model_drag_dest(treeview, targets, GDK_ACTION_MOVE);
+    gtk_tree_view_enable_model_drag_source(treeview, GDK_BUTTON1_MASK,
+                                           targets, GDK_ACTION_MOVE);
+    gdk_content_formats_unref(targets);
+#else
+    gtk_tree_view_enable_model_drag_dest(treeview, presets_drag_entries, 1,
                                             GDK_ACTION_MOVE);
     gtk_tree_view_enable_model_drag_source(treeview, GDK_BUTTON1_MASK,
-                                            &SrcEntry, 1, GDK_ACTION_MOVE);
+                                           presets_drag_entries, 1,
+                                           GDK_ACTION_MOVE);
+#endif
 
-    g_signal_connect(treeview, "drag_data_received", presets_drag_cb, ud);
+    g_signal_connect(treeview, "drag_data_received", presets_drag_data_received_cb, ud);
     g_signal_connect(treeview, "drag_motion", presets_drag_motion_cb, ud);
     g_signal_connect(treeview, "row_expanded", presets_row_expanded_cb, ud);
     g_signal_connect(treeview, "row_collapsed", presets_row_expanded_cb, ud);
@@ -617,7 +525,7 @@ IoRedirect(signal_user_data_t *ud)
     // Open activity log.
     config = ghb_get_user_config_dir(NULL);
     pid = getpid();
-    path = g_strdup_printf("%s/Activity.log.%d", config, pid);
+    path = g_strdup_printf("%s/Activity.log.%"PRId64, config, (long)pid);
     ud->activity_log = g_io_channel_new_file (path, "w", NULL);
     ud->job_activity_log = NULL;
     str = g_strdup_printf("<big><b>%s</b></big>", path);
@@ -714,7 +622,6 @@ watch_volumes(signal_user_data_t *ud)
 #endif
 }
 
-G_MODULE_EXPORT void x264_entry_changed_cb(GtkWidget *widget, signal_user_data_t *ud);
 G_MODULE_EXPORT void video_option_changed_cb(GtkWidget *widget, signal_user_data_t *ud);
 G_MODULE_EXPORT void plot_changed_cb(GtkWidget *widget, signal_user_data_t *ud);
 G_MODULE_EXPORT void position_overlay_cb(GtkWidget *widget, signal_user_data_t *ud);
@@ -723,109 +630,142 @@ G_MODULE_EXPORT void preview_hud_size_alloc_cb(GtkWidget *widget, signal_user_da
 // Important: any widgets named in CSS must have their widget names set
 // below before setting CSS properties on them.
 const gchar *MyCSS =
-"                                   \n\
-@define-color black  #000000;       \n\
-@define-color gray18 #2e2e2e;       \n\
-@define-color gray22 #383838;       \n\
-@define-color gray26 #424242;       \n\
-@define-color gray32 #525252;       \n\
-@define-color gray40 #666666;       \n\
-@define-color gray46 #757575;       \n\
-@define-color white  #ffffff;       \n\
-                                    \n\
-#preview_hud                        \n\
-{                                   \n\
-    border-radius: 20px;            \n\
-    background-color: alpha(@gray18, 0.8); \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-#live_preview_play,                 \n\
-#live_duration,                     \n\
-#preview_reset                      \n\
-{                                   \n\
-    background: @black;             \n\
-    background-color: @gray18;      \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-#preview_show_crop                  \n\
-{                                   \n\
-    background-color: @gray22;      \n\
-    border-color: @white;           \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-#live_encode_progress,              \n\
-#live_preview_progress,             \n\
-#preview_frame                      \n\
-{                                   \n\
-    background: @black;             \n\
-    background-color: alpha(@gray18, 0.0); \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-"
+"@define-color black  #000000;"
+"@define-color gray18 #2e2e2e;"
+"@define-color gray22 #383838;"
+"@define-color gray26 #424242;"
+"@define-color gray32 #525252;"
+"@define-color gray40 #666666;"
+"@define-color gray46 #757575;"
+"@define-color white  #ffffff;"
+
+"#preview_hud"
+"{"
+"    border-radius: 20px;"
+"    background-color: alpha(@gray18, 0.8);"
+"    color: @white;"
+"}"
+
+"#live_preview_play,"
+"#live_duration,"
+"#preview_reset"
+"{"
+"    background: @black;"
+"    background-color: @gray18;"
+"    color: @white;"
+"}"
+
+"#preview_show_crop"
+"{"
+"    background-color: @gray22;"
+"    border-color: @white;"
+"    color: @white;"
+"}"
+
+"#live_encode_progress,"
+"#live_preview_progress,"
+"#preview_frame"
+"{"
+"    background: @black;"
+"    background-color: alpha(@gray18, 0.0);"
+"    color: @white;"
+"}"
+
 #if GTK_CHECK_VERSION(3, 20, 0)
-"\
-#preview_reset:hover                \n\
-"
+"#preview_reset:hover"
 #else
-"\
-#preview_reset:prelight             \n\
-"
+"#preview_reset:prelight"
 #endif
-"\
-{                                   \n\
-    background: @black;             \n\
-    background-color: @gray32;      \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-#preview_reset:active               \n\
-{                                   \n\
-    background: @black;             \n\
-    background-color: @gray32;      \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-#preview_reset:active               \n\
-{                                   \n\
-    background: @black;             \n\
-    background-color: @gray32;      \n\
-    color: @white;                  \n\
-}                                   \n\
-                                    \n\
-textview                            \n\
-{                                   \n\
-    padding: 5px 5px 5px 5px;       \n\
-}                                   \n\
-                                    \n\
-.entry                              \n\
-{                                   \n\
-    margin: 0px 5px 0px 5px;        \n\
-    padding: 0px 0px 0px 0px;       \n\
-}                                   \n\
-"
+"{"
+"    background: @black;"
+"    background-color: @gray32;"
+"    color: @white;"
+"}"
+
+"#preview_reset:active"
+"{"
+"    background: @black;"
+"    background-color: @gray32;"
+"    color: @white;"
+"}"
+
+"#preview_reset:active"
+"{"
+"    background: @black;"
+"    background-color: @gray32;"
+"    color: @white;"
+"}"
+
+"textview"
+"{"
+"    padding: 5px 5px 5px 5px;"
+"}"
+
+".entry"
+"{"
+"    margin: 0px 5px 0px 5px;"
+"    padding: 0px 0px 0px 0px;"
+"}"
+
 #if GTK_CHECK_VERSION(3, 20, 0)
-"                                   \n\
-stackswitcher button.text-button    \n\
-{                                   \n\
-    min-width: 50px;                \n\
-}                                   \n\
-"
+"stackswitcher button.text-button"
+"{"
+"    min-width: 50px;"
+"}"
 #endif
+
 #if GTK_CHECK_VERSION(3, 16, 0)
-"                                   \n\
-                                    \n\
-#activity_view                      \n\
-{                                   \n\
-    font-family: monospace;         \n\
-    font-size: 8pt;                 \n\
-    font-weight: lighter;           \n\
-}                                   \n\
-"
+"#activity_view"
+"{"
+"    font-family: monospace;"
+"    font-size: 8pt;"
+"    font-weight: lighter;"
+"}"
 #endif
+
+".row:not(:first-child)"
+"{"
+"    border-top: 1px solid transparent; "
+"    border-bottom: 1px solid transparent; "
+"}"
+".row:first-child"
+"{"
+"    border-top: 1px solid transparent; "
+"    border-bottom: 1px solid transparent; "
+"}"
+".row:last-child"
+"{"
+"    border-top: 1px solid transparent; "
+"    border-bottom: 1px solid transparent; "
+"}"
+".row.drag-icon"
+"{"
+"    background: white; "
+"    border: 1px solid black; "
+"}"
+".row.drag-row"
+"{"
+"    color: gray; "
+"    background: alpha(gray,0.2); "
+"}"
+".row.drag-row.drag-hover"
+"{"
+"    border-top: 1px solid #4e9a06; "
+"    border-bottom: 1px solid #4e9a06; "
+"}"
+".row.drag-hover image, "
+".row.drag-hover label"
+"{"
+"    color: #4e9a06; "
+"}"
+".row.drag-hover-top"
+"{"
+"    border-top: 1px solid #4e9a06; "
+"}"
+".row.drag-hover-bottom"
+"{"
+"    border-bottom: 1px solid #4e9a06; "
+"}"
 ;
 
 extern G_MODULE_EXPORT void status_icon_query_tooltip_cb(void);
@@ -854,9 +794,35 @@ queue_start_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
 G_MODULE_EXPORT void
 queue_pause_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
 G_MODULE_EXPORT void
-queue_save_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+queue_export_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
 G_MODULE_EXPORT void
-queue_open_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+queue_import_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+G_MODULE_EXPORT void
+queue_open_source_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+G_MODULE_EXPORT void
+queue_open_dest_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+G_MODULE_EXPORT void
+queue_open_log_dir_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+G_MODULE_EXPORT void
+queue_open_log_action_cb(GSimpleAction *action, GVariant *param, gpointer ud);
+G_MODULE_EXPORT void
+queue_delete_all_action_cb(GSimpleAction *action, GVariant *param,
+                           gpointer ud);
+G_MODULE_EXPORT void
+queue_delete_complete_action_cb(GSimpleAction *action, GVariant *param,
+                                gpointer ud);
+G_MODULE_EXPORT void
+queue_reset_fail_action_cb(GSimpleAction *action, GVariant *param,
+                           gpointer ud);
+G_MODULE_EXPORT void
+queue_reset_all_action_cb(GSimpleAction *action, GVariant *param,
+                          gpointer ud);
+G_MODULE_EXPORT void
+queue_reset_action_cb(GSimpleAction *action, GVariant *param,
+                      gpointer ud);
+G_MODULE_EXPORT void
+queue_edit_action_cb(GSimpleAction *action, GVariant *param,
+                     gpointer ud);
 G_MODULE_EXPORT void
 show_presets_action_cb(GSimpleAction *action, GVariant *value, gpointer ud);
 G_MODULE_EXPORT void
@@ -896,39 +862,49 @@ static void map_actions(GApplication * app, signal_user_data_t * ud)
 {
     const GActionEntry entries[] =
     {
-        { "source",         source_action_cb                },
-        { "single",         single_title_action_cb          },
-        { "destination",    destination_action_cb           },
-        { "preferences",    preferences_action_cb           },
-        { "quit",           quit_action_cb                  },
-        { "queue-add",      queue_add_action_cb             },
-        { "queue-add-all",  queue_add_all_action_cb         },
-        { "queue-start",    queue_start_action_cb           },
-        { "queue-pause",    queue_pause_action_cb           },
-        { "queue-save",     queue_save_action_cb            },
-        { "queue-open",     queue_open_action_cb            },
-        { "hbfd",           NULL,
-          NULL, "false",    hbfd_action_cb                  },
-        { "show-presets",   NULL,
-          NULL, "false",    show_presets_action_cb          },
-        { "show-queue",     NULL,
-          NULL, "false",    show_queue_action_cb            },
-        { "show-preview",   NULL,
-          NULL, "false",    show_preview_action_cb          },
-        { "show-activity",  NULL,
-          NULL, "false",    show_activity_action_cb         },
-        { "preset-save",    preset_save_action_cb           },
-        { "preset-save-as", preset_save_as_action_cb        },
-        { "preset-rename",  preset_rename_action_cb         },
-        { "preset-remove",  preset_remove_action_cb         },
-        { "preset-default", preset_default_action_cb        },
-        { "preset-export",  preset_export_action_cb         },
-        { "preset-import",  preset_import_action_cb         },
-        { "presets-reload", presets_reload_action_cb        },
-        { "about",          about_action_cb                 },
-        { "guide",          guide_action_cb                 },
-        { "preset-select",  preset_select_action_cb, "s"    },
-        { "preset-reload",  preset_reload_action_cb,        },
+        { "source",                source_action_cb                },
+        { "single",                single_title_action_cb          },
+        { "destination",           destination_action_cb           },
+        { "preferences",           preferences_action_cb           },
+        { "quit",                  quit_action_cb                  },
+        { "queue-add",             queue_add_action_cb             },
+        { "queue-add-all",         queue_add_all_action_cb         },
+        { "queue-start",           queue_start_action_cb           },
+        { "queue-pause",           queue_pause_action_cb           },
+        { "queue-open-source",     queue_open_source_action_cb     },
+        { "queue-open-dest",       queue_open_dest_action_cb       },
+        { "queue-open-log-dir",    queue_open_log_dir_action_cb    },
+        { "queue-open-log",        queue_open_log_action_cb        },
+        { "queue-reset-fail",      queue_reset_fail_action_cb      },
+        { "queue-reset-all",       queue_reset_all_action_cb       },
+        { "queue-reset",           queue_reset_action_cb           },
+        { "queue-delete-complete", queue_delete_complete_action_cb },
+        { "queue-delete-all",      queue_delete_all_action_cb      },
+        { "queue-export",          queue_export_action_cb          },
+        { "queue-import",          queue_import_action_cb          },
+        { "queue-edit",            queue_edit_action_cb            },
+        { "hbfd",                  NULL,
+          NULL, "false",           hbfd_action_cb                  },
+        { "show-presets",          NULL,
+          NULL, "false",           show_presets_action_cb          },
+        { "show-queue",            NULL,
+          NULL, "false",           show_queue_action_cb            },
+        { "show-preview",          NULL,
+          NULL, "false",           show_preview_action_cb          },
+        { "show-activity",         NULL,
+          NULL, "false",           show_activity_action_cb         },
+        { "preset-save",           preset_save_action_cb           },
+        { "preset-save-as",        preset_save_as_action_cb        },
+        { "preset-rename",         preset_rename_action_cb         },
+        { "preset-remove",         preset_remove_action_cb         },
+        { "preset-default",        preset_default_action_cb        },
+        { "preset-export",         preset_export_action_cb         },
+        { "preset-import",         preset_import_action_cb         },
+        { "presets-reload",        presets_reload_action_cb        },
+        { "about",                 about_action_cb                 },
+        { "guide",                 guide_action_cb                 },
+        { "preset-select",         preset_select_action_cb, "s"    },
+        { "preset-reload",         preset_reload_action_cb,        },
     };
     g_action_map_add_action_entries(G_ACTION_MAP(app), entries,
                                     G_N_ELEMENTS(entries), ud);
@@ -970,16 +946,35 @@ ghb_idle_ui_init(signal_user_data_t *ud)
     return FALSE;
 }
 
+#if GTK_CHECK_VERSION(3, 90, 0)
+extern G_MODULE_EXPORT void easter_egg_multi_cb(void);
+extern G_MODULE_EXPORT void preview_leave_cb(void);
+extern G_MODULE_EXPORT void preview_motion_cb(void);
+extern G_MODULE_EXPORT void preview_draw_cb(GtkDrawingArea*, cairo_t*, int, int,
+                                            gpointer);
+extern G_MODULE_EXPORT void hud_enter_cb(void);
+extern G_MODULE_EXPORT void hud_leave_cb(void);
+#endif
+
 extern G_MODULE_EXPORT void
 ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
 {
     GtkCssProvider     * provider = gtk_css_provider_new();
 
     ghb_css_provider_load_from_data(provider, MyCSS, -1);
+
+#if GTK_CHECK_VERSION(3, 90, 0)
+    GdkDisplay *dd = gdk_display_get_default();
+    gtk_style_context_add_provider_for_display(dd,
+                                GTK_STYLE_PROVIDER(provider),
+                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#else
     GdkScreen *ss = gdk_screen_get_default();
     gtk_style_context_add_provider_for_screen(ss,
                                 GTK_STYLE_PROVIDER(provider),
                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+#endif
+
     g_object_unref(provider);
 
     ghb_resource_init();
@@ -1011,14 +1006,27 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
 
     ud->builder = create_builder_or_die(BUILDER_NAME);
 
+    // Enable drag & drop in queue list
+    ghb_queue_drag_n_drop_init(ud);
+
     // Enable events that alert us to media change events
     watch_volumes(ud);
 
-#if defined(_NO_UPDATE_CHECK)
     GtkWidget *widget;
+
+#if defined(_NO_UPDATE_CHECK)
     widget = GHB_WIDGET(ud->builder, "check_updates_box");
     gtk_widget_hide(widget);
 #endif
+
+    // Get GtkTextBuffers for activity logs
+    widget = GHB_WIDGET(ud->builder, "activity_view");
+    ud->activity_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widget));
+    g_object_ref(ud->activity_buffer);
+    widget = GHB_WIDGET(ud->builder, "queue_activity_view");
+    ud->extra_activity_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widget));
+    g_object_ref(ud->extra_activity_buffer);
+    ud->queue_activity_buffer = gtk_text_buffer_new(NULL);
 
     // Must set the names of the widgets that I want to modify
     // style for.
@@ -1036,16 +1044,11 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
     ghb_preview_init(ud);
     IoRedirect(ud);
     ghb_log( "%s - %s - %s",
-        HB_PROJECT_TITLE, HB_PROJECT_BUILD_TITLE, HB_PROJECT_URL_WEBSITE );
+        HB_PROJECT_TITLE, HB_PROJECT_HOST_TITLE, HB_PROJECT_URL_WEBSITE );
     ghb_init_dep_map();
 
-    // Need to connect x264_options textview buffer to the changed signal
-    // since it can't be done automatically
-    GtkTextView *textview;
-    GtkTextBuffer *buffer;
-    textview = GTK_TEXT_VIEW(GHB_WIDGET(ud->builder, "x264Option"));
-    buffer = gtk_text_view_get_buffer(textview);
-    g_signal_connect(buffer, "changed", (GCallback)x264_entry_changed_cb, ud);
+    GtkTextView   * textview;
+    GtkTextBuffer * buffer;
 
     textview = GTK_TEXT_VIEW(GHB_WIDGET(ud->builder, "VideoOptionExtra"));
     buffer = gtk_text_view_get_buffer(textview);
@@ -1066,8 +1069,7 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
     bind_audio_tree_model(ud);
     bind_subtitle_tree_model(ud);
     bind_presets_tree_model(ud);
-    bind_queue_tree_model(ud);
-    bind_chapter_tree_model(ud);
+
     // Connect up the signals to their callbacks
     // I wrote my own connector so that I could pass user data
     // to the callbacks.  Builder's standard autoconnect doesn't all this.
@@ -1075,9 +1077,6 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
 
     ghb_init_audio_defaults_ui(ud);
     ghb_init_subtitle_defaults_ui(ud);
-
-    // Parsing x264 options "" initializes x264 widgets to proper defaults
-    ghb_x264_init(ud);
 
     // Load prefs before presets.  Some preset defaults may depend
     // on preference settings.
@@ -1136,6 +1135,7 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
         SourceFilterEVO
         SourceFilterVOB
         SourceFilterMKV
+        SourceFilterWebM
         SourceFilterMP4
         SourceFilterAVI
         SourceFilterMOV
@@ -1183,6 +1183,10 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
     gtk_file_filter_set_name(filter, "MKV");
     gtk_file_filter_add_pattern(filter, "*.mkv");
     gtk_file_filter_add_pattern(filter, "*.MKV");
+    gtk_file_chooser_add_filter(chooser, filter);
+    filter = GTK_FILE_FILTER(GHB_OBJECT(ud->builder, "SourceFilterWebM"));
+    gtk_file_filter_set_name(filter, "WebM");
+    gtk_file_filter_add_pattern(filter, "*.webm");
     gtk_file_chooser_add_filter(chooser, filter);
     filter = GTK_FILE_FILTER(GHB_OBJECT(ud->builder, "SourceFilterMP4"));
     gtk_file_filter_set_name(filter, "MP4");
@@ -1265,6 +1269,36 @@ ghb_activate_cb(GApplication * app, signal_user_data_t * ud)
     gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(ghb_window));
     GtkWidget * window = GHB_WIDGET(ud->builder, "presets_window");
     gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(window));
+    window = GHB_WIDGET(ud->builder, "queue_window");
+    gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(window));
+
+#if GTK_CHECK_VERSION(3, 90, 0)
+    // GTK4 Event handling.
+    GtkGesture         * gest;
+    GtkEventController * econ;
+
+    // Easter egg multi-click
+    gest = gtk_gesture_multi_press_new();
+    widget = GHB_WIDGET(ud->builder, "easter_box");
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(gest));
+    g_signal_connect(gest, "pressed", easter_egg_multi_cb, ud);
+
+    // Preview HUD popup management via mouse motion
+    econ = gtk_event_controller_motion_new();
+    widget = GHB_WIDGET(ud->builder, "preview_image");
+    gtk_widget_add_controller(widget, econ);
+    g_signal_connect(econ, "leave", preview_leave_cb, ud);
+    g_signal_connect(econ, "motion", preview_motion_cb, ud);
+
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(widget), preview_draw_cb,
+                                   ud, NULL);
+
+    econ = gtk_event_controller_motion_new();
+    widget = GHB_WIDGET(ud->builder, "preview_hud");
+    gtk_widget_add_controller(widget, econ);
+    g_signal_connect(econ, "enter", hud_enter_cb, ud);
+    g_signal_connect(econ, "leave", hud_leave_cb, ud);
+#endif
 
     gtk_widget_show(ghb_window);
 }
@@ -1349,7 +1383,6 @@ main(int argc, char *argv[])
     ghb_value_free(&ud->settings_array);
     ghb_value_free(&ud->prefs);
     ghb_value_free(&ud->globals);
-    ghb_value_free(&ud->x264_priv);
 
     if (ud->activity_log != NULL)
         g_io_channel_unref(ud->activity_log);
@@ -1358,6 +1391,11 @@ main(int argc, char *argv[])
 
     if (ud->builder != NULL)
         g_object_unref(ud->builder);
+
+    g_object_unref(ud->extra_activity_buffer);
+    g_object_unref(ud->queue_activity_buffer);
+    g_object_unref(ud->activity_buffer);
+    g_free(ud->extra_activity_path);
 
     g_free(ud->current_dvd_device);
     g_free(ud);

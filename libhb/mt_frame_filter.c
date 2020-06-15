@@ -1,19 +1,19 @@
 /* mt_frame_filter.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-/* This is a psuedo-filter that wraps other filters to provide frame
+/* This is a pseudo-filter that wraps other filters to provide frame
  * based multi-threading of the wrapped filter. The sub-filter must
  * operate on each frame independently with no context carried over
  * from one frame to the next. */
 
-#include "hb.h"
-#include "taskset.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/taskset.h"
 
 typedef struct
 {

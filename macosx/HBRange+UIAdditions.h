@@ -18,7 +18,10 @@
 
 @end
 
-#pragma mark - Value Trasformers
+#pragma mark - Value Transformers
 
 @interface HBTimeTransformer : NSValueTransformer
+@end
+
+@interface HBTimeInSecondsTransformer: NSValueTransformer
 @end

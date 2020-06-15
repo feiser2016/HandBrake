@@ -6,14 +6,17 @@
 
 #import <Cocoa/Cocoa.h>
 
-@class HBQueueController;
+@class HBAppDelegate;
+@class HBQueue;
 @class HBPresetsManager;
 
 @class HBJob;
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface HBController : NSWindowController
 
-- (instancetype)initWithQueue:(HBQueueController *)queueController presetsManager:(HBPresetsManager *)manager;
+- (instancetype)initWithDelegate:(HBAppDelegate *)delegate queue:(HBQueue *)queue presetsManager:(HBPresetsManager *)manager;
 
 - (void)launchAction;
 
@@ -28,11 +31,8 @@
 - (IBAction)addToQueue:(id)sender;
 - (IBAction)addAllTitlesToQueue:(id)sender;
 
-- (void)setQueueState:(NSUInteger)count;
-- (void)setQueueInfo:(NSString *)info progress:(double)progress hidden:(BOOL)hidden;
-
-- (IBAction)rip:(id)sender;
-- (IBAction)pause:(id)sender;
+- (IBAction)toggleStartCancel:(id)sender;
+- (IBAction)togglePauseResume:(id)sender;
 
 - (IBAction)selectPresetFromMenu:(id)sender;
 
@@ -44,5 +44,7 @@
 - (IBAction)deletePreset:(id)sender;
 - (IBAction)reloadPreset:(id)sender;
 
-
 @end
+
+NS_ASSUME_NONNULL_END
+

@@ -1,14 +1,14 @@
 /* encavcodecaudio.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
-#include "hbffmpeg.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/hbffmpeg.h"
 
 struct hb_work_private_s
 {
@@ -105,7 +105,11 @@ static int encavcodecaInit(hb_work_object_t *w, hb_job_t *job)
 
         case HB_ACODEC_FFAAC:
             codec_name = "aac";
-            av_dict_set(&av_opts, "stereo_mode", "ms_off", 0);
+            // Use 5.1 back for AAC because 5.1 side uses a
+            // not-so-universally supported feature to signal the
+            // non-standard layout
+            if (channel_layout == AV_CH_LAYOUT_5POINT1)
+                channel_layout  = AV_CH_LAYOUT_5POINT1_BACK;
             break;
 
         case HB_ACODEC_FFFLAC:
@@ -245,13 +249,13 @@ static int encavcodecaInit(hb_work_object_t *w, hb_job_t *job)
                        context->channel_layout, 0);
         av_opt_set_int(pv->swresample, "out_channel_layout",
                        context->channel_layout, 0);
+        av_opt_set_int(pv->swresample, "in_sample_rate",
+                       context->sample_rate, 0);
+        av_opt_set_int(pv->swresample, "out_sample_rate",
+                       context->sample_rate, 0);
         if (hb_audio_dither_is_supported(audio->config.out.codec))
         {
             // dithering needs the sample rate
-            av_opt_set_int(pv->swresample, "in_sample_rate",
-                           context->sample_rate, 0);
-            av_opt_set_int(pv->swresample, "out_sample_rate",
-                           context->sample_rate, 0);
             av_opt_set_int(pv->swresample, "dither_method",
                            audio->config.out.dither_method, 0);
         }

@@ -24,15 +24,15 @@ typedef NS_ENUM(NSUInteger, HBAddPresetControllerMode) {
 
 @interface HBAddPresetController ()
 
-@property (unsafe_unretained) IBOutlet NSTextField *name;
-@property (unsafe_unretained) IBOutlet NSTextField *desc;
+@property (nonatomic, unsafe_unretained) IBOutlet NSTextField *name;
+@property (nonatomic, unsafe_unretained) IBOutlet NSTextField *desc;
 
-@property (unsafe_unretained) IBOutlet NSPopUpButton *categories;
+@property (nonatomic, unsafe_unretained) IBOutlet NSPopUpButton *categories;
 
-@property (unsafe_unretained) IBOutlet NSPopUpButton *picSettingsPopUp;
-@property (unsafe_unretained) IBOutlet NSTextField *picWidth;
-@property (unsafe_unretained) IBOutlet NSTextField *picHeight;
-@property (unsafe_unretained) IBOutlet NSBox *picWidthHeightBox;
+@property (nonatomic, unsafe_unretained) IBOutlet NSPopUpButton *picSettingsPopUp;
+@property (nonatomic, unsafe_unretained) IBOutlet NSTextField *picWidth;
+@property (nonatomic, unsafe_unretained) IBOutlet NSTextField *picHeight;
+@property (nonatomic, unsafe_unretained) IBOutlet NSView *picWidthHeightBox;
 
 @property (nonatomic, strong) HBPreset *preset;
 @property (nonatomic, strong) HBMutablePreset *mutablePreset;
@@ -60,6 +60,7 @@ typedef NS_ENUM(NSUInteger, HBAddPresetControllerMode) {
     {
         NSParameterAssert(preset);
         _mutablePreset = [preset mutableCopy];
+        [_mutablePreset resetBuiltInAndDefaultState];
         _manager = manager;
         _width = customWidth;
         _height = customHeight;
@@ -253,8 +254,55 @@ typedef NS_ENUM(NSUInteger, HBAddPresetControllerMode) {
 
 - (IBAction)openUserGuide:(id)sender
 {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL
-                                            URLWithString:@"https://handbrake.fr/docs/en/1.1.0/advanced/custom-presets.html"]];
+    [[NSWorkspace sharedWorkspace] openURL:[HBUtilities.documentationURL URLByAppendingPathComponent:@"advanced/custom-presets.html"]];
+}
+
+@end
+
+@interface HBAddPresetController (TouchBar) <NSTouchBarProvider, NSTouchBarDelegate>
+@end
+
+@implementation HBAddPresetController (TouchBar)
+
+@dynamic touchBar;
+
+static NSTouchBarItemIdentifier HBTouchBarGroup = @"fr.handbrake.buttonsGroup";
+static NSTouchBarItemIdentifier HBTouchBarAdd = @"fr.handbrake.openSource";
+static NSTouchBarItemIdentifier HBTouchBarCancel = @"fr.handbrake.addToQueue";
+
+- (NSTouchBar *)makeTouchBar
+{
+    NSTouchBar *bar = [[NSTouchBar alloc] init];
+    bar.delegate = self;
+
+    bar.defaultItemIdentifiers = @[NSTouchBarItemIdentifierOtherItemsProxy, HBTouchBarGroup];
+    bar.principalItemIdentifier = HBTouchBarGroup;
+
+    return bar;
+}
+
+- (NSTouchBarItem *)touchBar:(NSTouchBar *)touchBar makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier
+{
+    if ([identifier isEqualTo:HBTouchBarGroup])
+    {
+        NSCustomTouchBarItem *cancelItem = [[NSCustomTouchBarItem alloc] initWithIdentifier:HBTouchBarAdd];
+        cancelItem.customizationLabel = NSLocalizedString(@"Cancel", @"Touch bar");
+        NSButton *cancelButton = [NSButton buttonWithTitle:NSLocalizedString(@"Cancel", @"Touch bar") target:self action:@selector(cancel:)];
+        [cancelButton.widthAnchor constraintGreaterThanOrEqualToConstant:160].active = YES;
+        cancelItem.view = cancelButton;
+
+        NSCustomTouchBarItem *addItem = [[NSCustomTouchBarItem alloc] initWithIdentifier:HBTouchBarCancel];
+        addItem.customizationLabel = NSLocalizedString(@"Add Preset", @"Touch bar");
+        NSButton *addButton = [NSButton buttonWithTitle:NSLocalizedString(@"Add Preset", @"Touch bar") target:self action:@selector(add:)];
+        [addButton.widthAnchor constraintGreaterThanOrEqualToConstant:160].active = YES;
+        addButton.keyEquivalent = @"\r";
+        addItem.view = addButton;
+
+        NSGroupTouchBarItem *item = [NSGroupTouchBarItem groupItemWithIdentifier:identifier items:@[cancelItem, addItem]];
+        return item;
+    }
+
+    return nil;
 }
 
 @end

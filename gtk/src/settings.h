@@ -1,13 +1,12 @@
 /*
  * settings.h
- * Copyright (C) John Stebbins 2008-2018 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2020 <stebbins@stebbins>
  *
  * settings.h is free software.
  *
  * You may redistribute it and/or modify it under the terms of the
- * GNU General Public License, as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option)
- * any later version.
+ * GNU General Public License version 2, as published by the Free Software
+ * Foundation.
  *
  * settings.h is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -63,7 +62,6 @@ typedef struct
     gboolean              scale_busy;
     gint                  cancel_encode;
     GtkBuilder          * builder;
-    GhbValue            * x264_priv;
     GhbValue            * globals;
     GhbValue            * prefs;
     GhbValue            * settings;
@@ -71,6 +69,11 @@ typedef struct
     GhbValue            * queue;
     GIOChannel          * activity_log;
     GIOChannel          * job_activity_log;
+    GtkTextBuffer       * activity_buffer;
+    GtkTextBuffer       * queue_activity_buffer;
+    GtkTextBuffer       * extra_activity_buffer;
+    char                * extra_activity_path;
+    gboolean              append_queue_activity;
     preview_t           * preview;
     gchar               * appcast;
     gint                  appcast_len;
@@ -86,27 +89,6 @@ enum
     GHB_QUEUE_FAIL,
     GHB_QUEUE_DONE,
 };
-
-GhbValue* ghb_get_title_settings(GhbValue *settings);
-GhbValue* ghb_get_title_audio_list(GhbValue *settings);
-GhbValue* ghb_get_title_subtitle_list(GhbValue *settings);
-
-GhbValue* ghb_get_job_settings(GhbValue *settings);
-GhbValue* ghb_get_job_source_settings(GhbValue *settings);
-GhbValue* ghb_get_job_range_settings(GhbValue *settings);
-GhbValue* ghb_get_job_par_settings(GhbValue *settings);
-GhbValue* ghb_get_job_dest_settings(GhbValue *settings);
-GhbValue* ghb_get_job_video_settings(GhbValue *settings);
-GhbValue* ghb_get_job_metadata_settings(GhbValue *settings);
-GhbValue* ghb_get_job_chapter_list(GhbValue *settings);
-GhbValue* ghb_get_job_mp4_settings(GhbValue *settings);
-GhbValue* ghb_get_job_audio_settings(GhbValue *settings);
-GhbValue* ghb_get_job_audio_list(GhbValue *settings);
-GhbValue* ghb_get_job_subtitle_settings(GhbValue *settings);
-GhbValue* ghb_get_job_subtitle_list(GhbValue *settings);
-GhbValue* ghb_get_job_subtitle_search(GhbValue *settings);
-GhbValue* ghb_get_job_filter_settings(GhbValue *settings);
-GhbValue* ghb_get_job_filter_list(GhbValue *settings);
 
 void ghb_settings_copy(
     GhbValue *settings, const gchar *key, const GhbValue *value);

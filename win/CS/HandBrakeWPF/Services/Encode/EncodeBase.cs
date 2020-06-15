@@ -14,10 +14,9 @@ namespace HandBrakeWPF.Services.Encode
     using System.Globalization;
     using System.IO;
 
-    using HandBrake.Interop.Interop.EventArgs;
     using HandBrake.Interop.Model;
 
-    using HandBrakeWPF.Services.Encode.Interfaces;
+    using HandBrakeWPF.Services.Interfaces;
     using HandBrakeWPF.Utilities;
 
     using EncodeCompletedEventArgs = HandBrakeWPF.Services.Encode.EventArgs.EncodeCompletedEventArgs;
@@ -27,18 +26,19 @@ namespace HandBrakeWPF.Services.Encode
     using EncodeTask = HandBrakeWPF.Services.Encode.Model.EncodeTask;
     using GeneralApplicationException = HandBrakeWPF.Exceptions.GeneralApplicationException;
     using ILog = HandBrakeWPF.Services.Logging.Interfaces.ILog;
-    using LogService = HandBrakeWPF.Services.Logging.LogService;
 
     /// <summary>
     /// A Base Class for the Encode Services.
     /// </summary>
     public class EncodeBase
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="EncodeBase"/> class.
-        /// </summary>
-        public EncodeBase()
-        {    
+        protected ILog encodeLogService;
+
+        private readonly IUserSettingService userSettingService;
+        
+        public EncodeBase(IUserSettingService userSettingService)
+        {
+            this.userSettingService = userSettingService;
         }
 
         #region Events
@@ -132,8 +132,7 @@ namespace HandBrakeWPF.Services.Encode
                 string encodeDestinationPath = Path.GetDirectoryName(destination);
                 string destinationFile = Path.GetFileName(destination);
                 string encodeLogFile = destinationFile + " " + DateTime.Now.ToString(CultureInfo.InvariantCulture).Replace("/", "-").Replace(":", "-") + ".txt";
-                ILog log = LogService.GetLogger();
-                string logContent = log.ActivityLog;
+                string logContent = this.encodeLogService.GetFullLog();
 
                 // Make sure the log directory exists.
                 if (!Directory.Exists(logDir))
@@ -145,15 +144,15 @@ namespace HandBrakeWPF.Services.Encode
                 this.WriteFile(logContent, Path.Combine(logDir, encodeLogFile));
 
                 // Save a copy of the log file in the same location as the enocde.
-                if (configuration.SaveLogWithVideo)
+                if (this.userSettingService.GetUserSetting<bool>(UserSettingConstants.SaveLogWithVideo))
                 {
                     this.WriteFile(logContent, Path.Combine(encodeDestinationPath, encodeLogFile));
                 }
 
                 // Save a copy of the log file to a user specified location
-                if (Directory.Exists(configuration.SaveLogCopyDirectory) && configuration.SaveLogToCopyDirectory)
+                if (Directory.Exists(this.userSettingService.GetUserSetting<string>(UserSettingConstants.SaveLogCopyDirectory)) && this.userSettingService.GetUserSetting<bool>(UserSettingConstants.SaveLogToCopyDirectory))
                 {
-                    this.WriteFile(logContent, Path.Combine(configuration.SaveLogCopyDirectory, encodeLogFile));
+                    this.WriteFile(logContent, Path.Combine(this.userSettingService.GetUserSetting<string>(UserSettingConstants.SaveLogCopyDirectory), encodeLogFile));
                 }
 
                 return Path.Combine(logDir, encodeLogFile);

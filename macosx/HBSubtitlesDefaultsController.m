@@ -16,8 +16,8 @@ static void *HBSubtitlesDefaultsContext = &HBSubtitlesDefaultsContext;
 @property (nonatomic, readonly) HBSubtitlesDefaults *settings;
 
 @property (nonatomic, readonly) HBLanguagesSelection *languagesList;
-@property (unsafe_unretained) IBOutlet HBLanguageArrayController *tableController;
-@property (unsafe_unretained) IBOutlet NSButton *showAllButton;
+@property (nonatomic, unsafe_unretained) IBOutlet HBLanguageArrayController *tableController;
+@property (nonatomic, unsafe_unretained) IBOutlet NSButton *showAllButton;
 
 @end
 
@@ -37,7 +37,7 @@ static void *HBSubtitlesDefaultsContext = &HBSubtitlesDefaultsContext;
 
 - (void)windowDidLoad
 {
-    [self addObserver:self forKeyPath:@"tableController.showSelectedOnly" options:0 context:HBSubtitlesDefaultsContext];
+    [self addObserver:self forKeyPath:@"tableController.showSelectedOnly" options:NSKeyValueObservingOptionInitial context:HBSubtitlesDefaultsContext];
 
     if (self.settings.trackSelectionLanguages.count)
     {
@@ -78,8 +78,7 @@ static void *HBSubtitlesDefaultsContext = &HBSubtitlesDefaultsContext;
 
 - (IBAction)openUserGuide:(id)sender
 {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL
-                                            URLWithString:@"https://handbrake.fr/docs/en/1.1.0/advanced/audio-subtitle-defaults.html"]];
+    [[NSWorkspace sharedWorkspace] openURL:[HBUtilities.documentationURL URLByAppendingPathComponent:@"advanced/audio-subtitle-defaults.html"]];
 }
 
 - (void)dealloc

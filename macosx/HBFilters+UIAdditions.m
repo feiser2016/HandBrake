@@ -5,7 +5,9 @@
  It may be used under the terms of the GNU General Public License. */
 
 #import "HBFilters+UIAdditions.h"
-#import "hb.h"
+#import "HBLocalizationUtilities.h"
+
+#import "handbrake/handbrake.h"
 
 /**
  *  Converts a hb_filter_param_t * array to a NSArray of NSString.
@@ -21,7 +23,10 @@ static NSArray * filterParamsToNamesArray(hb_filter_param_t * (f)(int), int filt
     {
         NSString *name = @(preset->name);
         if ([name isEqualToString:@"Off"]) {
-            name = NSLocalizedString(@"Off", @"HBFilters -> off display name");
+            name = NSLocalizedStringFromTableInBundle(@"Off", nil, [NSBundle bundleForClass:[HBFilters class]], "HBFilters -> off display name");
+        }
+        else if ([name isEqualToString:@"Custom"]) {
+            name = NSLocalizedStringFromTableInBundle(@"Custom", nil, [NSBundle bundleForClass:[HBFilters class]], "HBFilters -> custom display name");
         }
         [presets addObject:name];
     }
@@ -43,7 +48,10 @@ static NSDictionary * filterParamsToNamesDict(hb_filter_param_t * (f)(int), int 
     {
         NSString *name = @(preset->name);
         if ([name isEqualToString:@"Off"]) {
-            name = NSLocalizedString(@"Off", @"HBFilters -> off display name");
+            name = NSLocalizedStringFromTableInBundle(@"Off", nil, [NSBundle bundleForClass:[HBFilters class]], "HBFilters -> off display name");
+        }
+        else if ([name isEqualToString:@"Custom"]) {
+            name = NSLocalizedStringFromTableInBundle(@"Custom", nil, [NSBundle bundleForClass:[HBFilters class]], "HBFilters -> custom display name");
         }
         [presets setObject:@(preset->short_name) forKey:name];
     }
@@ -60,7 +68,14 @@ static NSDictionary * filterParamsToNamesDict(hb_filter_param_t * (f)(int), int 
 
 - (id)transformedValue:(id)value
 {
-    return [[self.dict allKeysForObject:value] firstObject];
+    if (value)
+    {
+        return [[self.dict allKeysForObject:value] firstObject];
+    }
+    else
+    {
+        return nil;
+    }
 }
 
 + (BOOL)allowsReverseTransformation
@@ -199,24 +214,26 @@ static NSDictionary * filterParamsToNamesDict(hb_filter_param_t * (f)(int), int 
 
 @end
 
-@implementation HBCustomFilterTransformer
+@implementation HBDeblockTuneTransformer
 
-+ (Class)transformedValueClass
+- (instancetype)init
 {
-    return [NSNumber class];
+    if (self = [super init])
+        self.dict = [HBFilters deblockTunesDict];
+
+    return self;
 }
 
-- (id)transformedValue:(id)value
-{
-    if ([value intValue] == 1)
-        return @NO;
-    else
-        return @YES;
-}
+@end
 
-+ (BOOL)allowsReverseTransformation
+@implementation HBDeblockTransformer
+
+- (instancetype)init
 {
-    return NO;
+    if (self = [super init])
+        self.dict = [HBFilters deblockPresetDict];
+
+    return self;
 }
 
 @end
@@ -236,6 +253,9 @@ static NSDictionary *denoiseTypesDict = nil;
 static NSDictionary *sharpenPresetDict = nil;
 static NSDictionary *sharpenTunesDict = nil;
 static NSDictionary *sharpenTypesDict = nil;
+
+static NSDictionary *deblockPresetDict = nil;
+static NSDictionary *deblockTunesDict = nil;
 
 @implementation HBFilters (UIAdditions)
 
@@ -264,16 +284,16 @@ static NSDictionary *sharpenTypesDict = nil;
 {
     if (!deinterlaceTypesDict)
     {
-        deinterlaceTypesDict = @{NSLocalizedString(@"Off", @"HBFilters -> filter display name"):        @"off",
-                                 NSLocalizedString(@"Yadif", @"HBFilters -> filter display name"):      @"deinterlace",
-                                 NSLocalizedString(@"Decomb", @"HBFilters -> filter display name"):     @"decomb"};;
+        deinterlaceTypesDict = @{HBKitLocalizedString(@"Off", @"HBFilters -> filter display name"):        @"off",
+                                 HBKitLocalizedString(@"Yadif", @"HBFilters -> filter display name"):      @"deinterlace",
+                                 HBKitLocalizedString(@"Decomb", @"HBFilters -> filter display name"):     @"decomb"};;
     }
     return deinterlaceTypesDict;
 }
 
 - (NSArray *)deinterlaceTypes
 {
-    return @[NSLocalizedString(@"Off", @"HBFilters -> filter display name"), NSLocalizedString(@"Yadif", @"HBFilters -> filter display name"), NSLocalizedString(@"Decomb", @"HBFilters -> filter display name")];
+    return @[HBKitLocalizedString(@"Off", @"HBFilters -> filter display name"), HBKitLocalizedString(@"Yadif", @"HBFilters -> filter display name"), HBKitLocalizedString(@"Decomb", @"HBFilters -> filter display name")];
 }
 
 + (NSDictionary *)decombPresetsDict
@@ -316,9 +336,9 @@ static NSDictionary *sharpenTypesDict = nil;
 {
     if (!denoiseTypesDict)
     {
-        denoiseTypesDict = @{NSLocalizedString(@"Off", @"HBFilters -> filter display name"):      @"off",
-                             NSLocalizedString(@"NLMeans", @"HBFilters -> filter display name"):  @"nlmeans",
-                             NSLocalizedString(@"HQDN3D", @"HBFilters -> filter display name"):   @"hqdn3d"};;
+        denoiseTypesDict = @{HBKitLocalizedString(@"Off", @"HBFilters -> filter display name"):      @"off",
+                             HBKitLocalizedString(@"NLMeans", @"HBFilters -> filter display name"):  @"nlmeans",
+                             HBKitLocalizedString(@"HQDN3D", @"HBFilters -> filter display name"):   @"hqdn3d"};;
     }
     return denoiseTypesDict;
 }
@@ -351,11 +371,29 @@ static NSDictionary *sharpenTypesDict = nil;
 {
     if (!sharpenTypesDict)
     {
-        sharpenTypesDict = @{NSLocalizedString(@"Off", @"HBFilters -> filter display name"):      @"off",
-                             NSLocalizedString(@"Unsharp", @"HBFilters -> filter display name"):  @"unsharp",
-                             NSLocalizedString(@"Lapsharp", @"HBFilters -> filter display name"): @"lapsharp"};;
+        sharpenTypesDict = @{HBKitLocalizedString(@"Off", @"HBFilters -> filter display name"):      @"off",
+                             HBKitLocalizedString(@"Unsharp", @"HBFilters -> filter display name"):  @"unsharp",
+                             HBKitLocalizedString(@"Lapsharp", @"HBFilters -> filter display name"): @"lapsharp"};
     }
     return sharpenTypesDict;
+}
+
++ (NSDictionary *)deblockPresetDict
+{
+    if (!deblockPresetDict)
+    {
+        deblockPresetDict = filterParamsToNamesDict(hb_filter_param_get_presets, HB_FILTER_DEBLOCK);
+    }
+    return deblockPresetDict;
+}
+
++ (NSDictionary *)deblockTunesDict
+{
+    if (!deblockTunesDict)
+    {
+        deblockTunesDict = filterParamsToNamesDict(hb_filter_param_get_tunes, HB_FILTER_DEBLOCK);
+    }
+    return deblockTunesDict;
 }
 
 - (NSArray *)detelecineSettings
@@ -382,7 +420,7 @@ static NSDictionary *sharpenTypesDict = nil;
 
 - (NSArray *)denoiseTypes
 {
-    return @[NSLocalizedString(@"Off", @"HBFilters -> filter display name"), NSLocalizedString(@"NLMeans", @"HBFilters -> filter display name"), NSLocalizedString(@"HQDN3D", @"HBFilters -> filter display name")];
+    return @[HBKitLocalizedString(@"Off", @"HBFilters -> filter display name"), HBKitLocalizedString(@"NLMeans", @"HBFilters -> filter display name"), HBKitLocalizedString(@"HQDN3D", @"HBFilters -> filter display name")];
 }
 
 - (NSArray *)denoisePresets
@@ -397,7 +435,7 @@ static NSDictionary *sharpenTypesDict = nil;
 
 - (NSArray *)sharpenTypes
 {
-    return @[NSLocalizedString(@"Off", @"HBFilters -> filter display name"), NSLocalizedString(@"Unsharp", @"HBFilters -> filter display name"), NSLocalizedString(@"Lapsharp", @"HBFilters -> filter display name")];
+    return @[HBKitLocalizedString(@"Off", @"HBFilters -> filter display name"), HBKitLocalizedString(@"Unsharp", @"HBFilters -> filter display name"), HBKitLocalizedString(@"Lapsharp", @"HBFilters -> filter display name")];
 }
 
 - (NSArray *)sharpenPresets
@@ -422,6 +460,16 @@ static NSDictionary *sharpenTypesDict = nil;
     {
         return filterParamsToNamesArray(hb_filter_param_get_tunes, HB_FILTER_LAPSHARP);
     }
+}
+
+- (NSArray *)deblockPresets
+{
+    return filterParamsToNamesArray(hb_filter_param_get_presets, HB_FILTER_DEBLOCK);
+}
+
+- (NSArray *)deblockTunes
+{
+    return filterParamsToNamesArray(hb_filter_param_get_tunes, HB_FILTER_DEBLOCK);
 }
 
 - (BOOL)customDetelecineSelected
@@ -474,16 +522,14 @@ static NSDictionary *sharpenTypesDict = nil;
     return ([self.sharpen isEqualToString:@"unsharp"] || [self.sharpen isEqualToString:@"lapsharp"]) && ![self.sharpenPreset isEqualToString:@"custom"];
 }
 
-- (NSString *)deblockSummary
+- (BOOL)deblockTunesAvailable
 {
-    if (self.deblock == 0)
-    {
-        return NSLocalizedString(@"Off", @"HBFilters -> filter summary");
-    }
-    else
-    {
-        return [NSString stringWithFormat: @"%.0ld", (long)self.deblock];
-    }
+    return ![self.deblock isEqualToString:@"off"] && ![self.deblock isEqualToString:@"custom"];
+}
+
+- (BOOL)customDeblockSelected
+{
+    return [self.deblock isEqualToString:@"custom"];
 }
 
 @end

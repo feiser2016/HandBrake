@@ -1,7 +1,7 @@
 CONTRIB.build/    = $(BUILD/)contrib/
 CONTRIB.download/ = $(SRC/)download/
-CONTRIB.host      = $(if $(filter 1,$(BUILD.cross)),$(BUILD.spec))
-CONTRIB.spec      = $(if $(filter 1,$(BUILD.cross)),$(HOST.spec))
+CONTRIB.host      = $(if $(filter 1,$(HOST.cross)),$(HOST.spec))
+CONTRIB.spec      = $(if $(filter 1,$(HOST.cross)),$(BUILD.spec))
 
 ###############################################################################
 
@@ -55,7 +55,7 @@ define import.CONTRIB.defs
     ##
     ## target: extract
     ##
-    $(1).EXTRACT.tarbase = $$(strip $$(foreach x,tar.bz2 tar.gz,$$(patsubst %.$$(x),%,$$(filter %.$$(x),$$($(1).FETCH.basename)))))
+    $(1).EXTRACT.tarbase = $$(strip $$(foreach x,tar.bz2 tar.gz tar.xz,$$(patsubst %.$$(x),%,$$(filter %.$$(x),$$($(1).FETCH.basename)))))
     $(1).EXTRACT.dir/    = $$($(1).build/)$$($(1).EXTRACT.tarbase)/
     $(1).EXTRACT.target  = $$($(1).build/).stamp.$$($(1).name).extract
     define $(1).EXTRACT
@@ -69,7 +69,7 @@ define import.CONTRIB.defs
     ##
     $(1).PATCH.srcs = $$(sort $$(wildcard \
         $$($(1).src/)A??-*.patch \
-        $$($(1).src/)P??-$$(BUILD.system)*.patch ))
+        $$($(1).src/)P??-$$(HOST.system)*.patch ))
 
     # extra line feed is required
     define $(1).PATCH.item
@@ -125,7 +125,7 @@ define import.CONTRIB.defs
     endif
     $(1).CONFIGURE.env.CPPFLAGS = CPPFLAGS="-I$$(call fn.ABSOLUTE,$(CONTRIB.build/))include $$(call fn.ARGS,$(1).GCC,*archs *sysroot *minver *D)"
     $(1).CONFIGURE.env.LDFLAGS  = LDFLAGS="-L$$(call fn.ABSOLUTE,$(CONTRIB.build/))lib $$(call fn.ARGS,$(1).GCC,*archs *sysroot *minver ?extra.exe *D)"
-    $(1).CONFIGURE.env.PKG_CONFIG_PATH  = PKG_CONFIG_PATH="$$(call fn.ABSOLUTE,$$(CONTRIB.build/))lib/pkgconfig"
+    $(1).CONFIGURE.env.PKG_CONFIG_PATH  = PKG_CONFIG_PATH="$$(call fn.ABSOLUTE,$$(CONTRIB.build/))lib/pkgconfig:$$(PKG_CONFIG_PATH)"
 
     $(1).CONFIGURE.env.args = !CC !CFLAGS !CXX !CXXFLAGS !CPPFLAGS !LD !LDFLAGS !PKG_CONFIG_PATH !LOCAL_PATH !CROSS
     $(1).CONFIGURE.env = $$(call fn.ARGS,$(1).CONFIGURE.env,$$($(1).CONFIGURE.env.args))

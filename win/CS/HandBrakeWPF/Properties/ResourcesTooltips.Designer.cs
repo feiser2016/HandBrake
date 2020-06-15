@@ -19,7 +19,7 @@ namespace HandBrakeWPF.Properties {
     // class via a tool like ResGen or Visual Studio.
     // To add or remove a member, edit your .ResX file then rerun ResGen
     // with the /str option, or rebuild your VS project.
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "15.0.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "16.0.0.0")]
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     public class ResourcesTooltips {
@@ -204,9 +204,7 @@ namespace HandBrakeWPF.Properties {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to This filter removes &apos;combing&apos; artifacts that are the result of telecining.
-        ///
-        ///Telecining is a process that adjusts film framerates that are 24fps to NTSC video frame rates which are 30fps..
+        ///   Looks up a localized string similar to Detelecine removes comb artifacts that are the result of telecine, a process for converting film frame rates to television frame rates..
         /// </summary>
         public static string FilterView_Detelecine {
             get {
@@ -466,6 +464,16 @@ namespace HandBrakeWPF.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to When enabled the auto name system will always use the default path. 
+        ///When disabled, it will use the path in the destination box on the main window if populated, otherwise it will use the default path..
+        /// </summary>
+        public static string OptionsView_AlwaysUseDefaultPath {
+            get {
+                return ResourceManager.GetString("OptionsView_AlwaysUseDefaultPath", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Anamorphic allows arbitrary storage dimensions while preserving the original aspect during playback.
         ///
         ///Off disables anamorphic. Video storage dimensions and display dimensions will be identical. Only useful for compatibility with certain legacy devices.
@@ -621,15 +629,6 @@ namespace HandBrakeWPF.Properties {
         public static string SourceSelection_TitleSpecific {
             get {
                 return ResourceManager.GetString("SourceSelection_TitleSpecific", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to Use advanced options Tab for x264 settings..
-        /// </summary>
-        public static string Video_AdvancedOptions {
-            get {
-                return ResourceManager.GetString("Video_AdvancedOptions", resourceCulture);
             }
         }
         

@@ -21,6 +21,7 @@
 @property (nonatomic, readonly) NSArray *levels;
 
 @property (nonatomic, readonly) BOOL fastDecodeSupported;
+@property (nonatomic, readonly) BOOL twoPassSupported;
 @property (nonatomic, readonly) BOOL turboTwoPassSupported;
 
 @property (nonatomic, readonly) NSString *unparseOptions;
@@ -29,17 +30,24 @@
 
 @property (nonatomic, readonly) double qualityMinValue;
 @property (nonatomic, readonly) double qualityMaxValue;
+@property (nonatomic, readonly) BOOL isConstantQualitySupported;
 
 @end
 
 /**
- *  A series of value trasformers to bridge the libhb enums
+ *  A series of value transformers to bridge the libhb enums
  *  to the textual rapresentations used in the interface.
  */
 @interface HBVideoEncoderTransformer : NSValueTransformer
 @end
 
 @interface HBFrameRateTransformer : NSValueTransformer
+@end
+
+@interface HBTuneTransformer : NSValueTransformer
+@end
+
+@interface HBTunesTransformer : NSValueTransformer
 @end
 
 @interface HBPresetsTransformer : NSValueTransformer
@@ -56,7 +64,6 @@
 - (BOOL)isUnparsedSupported:(int)encoder;
 - (BOOL)isPresetSystemSupported:(int)encoder;
 - (BOOL)isSimpleOptionsPanelSupported:(int)encoder;
-- (BOOL)isOldAdvancedPanelSupported:(int)encoder;
 - (void)qualityLimitsForEncoder:(int)encoder low:(float *)low high:(float *)high granularity:(float *)granularity direction:(int *)direction;
 
 @end

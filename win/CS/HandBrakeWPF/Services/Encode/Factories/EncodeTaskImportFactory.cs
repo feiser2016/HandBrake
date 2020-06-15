@@ -260,18 +260,17 @@ namespace HandBrakeWPF.Services.Encode.Factories
                 subtitleTrack.Default = subtitle.Default;
                 subtitleTrack.Forced = subtitle.Forced;
 
-                if (!string.IsNullOrEmpty(subtitle.SRT.Filename))
+                if (!string.IsNullOrEmpty(subtitle.Import.Filename))
                 {
-                    subtitleTrack.SubtitleType = SubtitleType.SRT;
-                    subtitleTrack.SrtCharCode = subtitle.SRT.Codeset;
-                    subtitleTrack.SrtFileName = subtitle.SRT.Filename;
-                    subtitleTrack.SrtLangCode = subtitle.SRT.Language;
+                    subtitleTrack.SubtitleType =  subtitle.Import.Filename.EndsWith("srt") ?  SubtitleType.SRT : SubtitleType.SSA;
+                    subtitleTrack.SrtCharCode = subtitle.Import.Codeset;
+                    subtitleTrack.SrtFileName = subtitle.Import.Filename;
+                    subtitleTrack.SrtLangCode = subtitle.Import.Language;
                     subtitleTrack.SrtLang = HandBrakeLanguagesHelper.Get(subtitleTrack.SrtLangCode).EnglishName;
                     subtitleTrack.SrtOffset = subtitleTrack.SrtOffset;
                 }
 
                 task.SubtitleTracks.Add(null);
-
             }
         }
 
@@ -318,7 +317,7 @@ namespace HandBrakeWPF.Services.Encode.Factories
             if (deblockFilter != null)
             {
                 var filterSettings = deblockFilter.Settings;
-                task.Deblock = filterSettings.Value<string>("qp").ToInt(); 
+                task.DeblockPreset = null; // TODO Support Preset / Tune
             }
 
             // Sharpen

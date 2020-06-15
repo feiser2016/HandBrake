@@ -11,62 +11,53 @@ namespace HandBrakeWPF.Helpers
 {
     using System.IO;
 
-    using HandBrake.Interop.Interop;
+    using Caliburn.Micro;
 
+    using HandBrake.Interop.Interop;
+    using HandBrake.Interop.Interop.EventArgs;
+
+    using HandBrakeWPF.Services.Logging.Interfaces;
     using HandBrakeWPF.Utilities;
 
     using ILog = HandBrakeWPF.Services.Logging.Interfaces.ILog;
-    using LogService = HandBrakeWPF.Services.Logging.LogService;
 
-    /// <summary>
-    /// Tempory Class to Initialise the logging.
-    /// </summary>
     public static class LogManager
     {
-        /// <summary>
-        /// The init.
-        /// </summary>
+        private static ILog generalAppLogger;
+
         public static void Init()
         {
-            ILog log = LogService.GetLogger();
+            generalAppLogger = IoC.Get<ILog>();
             string logDir = DirectoryUtilities.GetLogDirectory();
-            string logFile = Path.Combine(logDir, string.Format("activity_log{0}.txt", GeneralUtilities.ProcessId));
-            if (!Directory.Exists(Path.GetDirectoryName(logFile)))
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(logFile));
-            }
+            string filename = string.Format("activity_log.{0}.txt", GeneralUtilities.ProcessId);
+            string logFile = Path.Combine(logDir, filename);
+            generalAppLogger.ConfigureLogging(logFile);
 
-            log.Enable();
-            log.SetupLogHeader(GeneralUtilities.CreateLogHeader().ToString());
-            log.EnableLoggingToDisk(logFile, true);
+            IoC.Get<ILogInstanceManager>().RegisterLoggerInstance(filename, generalAppLogger, true);
+            
+
             HandBrakeUtils.MessageLogged += HandBrakeUtils_MessageLogged;
             HandBrakeUtils.ErrorLogged += HandBrakeUtils_ErrorLogged;
         }
 
-        /// <summary>
-        /// Subscribe the ErrorLogged event.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The e.
-        /// </param>
-        private static void HandBrakeUtils_ErrorLogged(object sender, HandBrake.Interop.Interop.EventArgs.MessageLoggedEventArgs e)
+        private static void HandBrakeUtils_ErrorLogged(object sender, MessageLoggedEventArgs e)
         {
+            if (e == null || string.IsNullOrEmpty(e.Message))
+            {
+                return;
+            }
+
+            generalAppLogger?.LogMessage(e.Message);
         }
 
-        /// <summary>
-        ///  Subscribe the MessageLogged event.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The e.
-        /// </param>
-        private static void HandBrakeUtils_MessageLogged(object sender, HandBrake.Interop.Interop.EventArgs.MessageLoggedEventArgs e)
+        private static void HandBrakeUtils_MessageLogged(object sender, MessageLoggedEventArgs e)
         {
+            if (e == null || string.IsNullOrEmpty(e.Message))
+            {
+                return;
+            }
+
+            generalAppLogger?.LogMessage(e.Message);
         }
     }
 }

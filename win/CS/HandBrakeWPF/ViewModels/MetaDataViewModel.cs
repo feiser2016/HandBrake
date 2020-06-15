@@ -42,7 +42,7 @@ namespace HandBrakeWPF.ViewModels
             this.task = new EncodeTask();
         }
 
-        public event EventHandler<TabStatusEventArgs> TabStatusChanged;
+        public event EventHandler<TabStatusEventArgs> TabStatusChanged { add { } remove { } }
 
         /// <summary>
         /// Gets or sets the meta data.
@@ -79,9 +79,9 @@ namespace HandBrakeWPF.ViewModels
         public void SetSource(Source source, Title selectedTitle, Preset currentPreset, EncodeTask encodeTask)
         {
             return; // Disabled for now.
-            this.task = encodeTask;
-            this.task.MetaData = new MetaData(selectedTitle.Metadata);
-            this.NotifyOfPropertyChange(() => this.MetaData);
+            // this.task = encodeTask;
+            // this.task.MetaData = new MetaData(selectedTitle.Metadata);
+            // this.NotifyOfPropertyChange(() => this.MetaData);
         }
 
         /// <summary>

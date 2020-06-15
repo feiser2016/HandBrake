@@ -1,7 +1,7 @@
 /* nlmeans.c
 
    Copyright (c) 2013 Dirk Farin
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -50,10 +50,10 @@
  *        etc...
  */
 
-#include "hb.h"
-#include "hbffmpeg.h"
-#include "taskset.h"
-#include "nlmeans.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/hbffmpeg.h"
+#include "handbrake/taskset.h"
+#include "handbrake/nlmeans.h"
 
 #define NLMEANS_STRENGTH_LUMA_DEFAULT      6
 #define NLMEANS_STRENGTH_CHROMA_DEFAULT    6
@@ -143,7 +143,10 @@ struct hb_filter_private_s
     int         max_frames;
 
     taskset_t   taskset;
-    nlmeans_thread_arg_t **thread_data;
+    nlmeans_thread_arg_t ** thread_data;
+
+    hb_filter_init_t        input;
+    hb_filter_init_t        output;
 };
 
 static int nlmeans_init(hb_filter_object_t *filter, hb_filter_init_t *init);
@@ -613,10 +616,7 @@ static void nlmeans_prefilter(BorderedPlane *src,
         // Duplicate plane
         uint8_t *mem_pre = malloc(bw * bh * sizeof(uint8_t));
         uint8_t *image_pre = mem_pre + border + bw * border;
-        for (int y = 0; y < h; y++)
-        {
-            memcpy(mem_pre + y * bw, mem + y * bw, bw);
-        }
+        memcpy(mem_pre, mem, bw * bh * sizeof(uint8_t));
 
         // Filter plane; should already have at least 2px extra border on each side
         if (filter_type & NLMEANS_PREFILTER_MODE_CSM5X5)
@@ -798,7 +798,6 @@ static void nlmeans_plane(NLMeansFunctions *functions,
                 // Apply special weight tuning to origin patch
                 if (dx == 0 && dy == 0 && f == 0)
                 {
-                    // TODO: Parallelize this
                     for (int y = n_half; y < dst_h-n + n_half; y++)
                     {
                         for (int x = n_half; x < dst_w-n + n_half; x++)
@@ -825,7 +824,6 @@ static void nlmeans_plane(NLMeansFunctions *functions,
                                           dy);
 
                 // Average displacement
-                // TODO: Parallelize this
                 for (int y = 0; y <= dst_h-n; y++)
                 {
                     const uint32_t *integral_ptr1 = integral + (y  -1)*integral_stride - 1;
@@ -896,6 +894,8 @@ static int nlmeans_init(hb_filter_object_t *filter,
     filter->private_data = calloc(sizeof(struct hb_filter_private_s), 1);
     hb_filter_private_t *pv = filter->private_data;
     NLMeansFunctions *functions = &pv->functions;
+
+    pv->input = *init;
 
     functions->build_integral = build_integral_scalar;
 #if defined(ARCH_X86)
@@ -994,8 +994,20 @@ static int nlmeans_init(hb_filter_object_t *filter,
         exptable[NLMEANS_EXPSIZE-1] = 0;
     }
 
-    // Sanitize
-    if (pv->threads < 1) { pv->threads = hb_get_cpu_count(); }
+    // Threads
+    if (pv->threads < 1) {
+        pv->threads = hb_get_cpu_count();
+
+        // Reduce internal thread count where we have many logical cores
+        // Too many threads increases CPU cache pressure, reducing performance
+        if (pv->threads >= 32) {
+            pv->threads = pv->threads / 2;
+        }
+        else if (pv->threads >= 16) {
+            pv->threads = (pv->threads / 4) * 3;
+        }
+    }
+    hb_log("NLMeans using %i threads", pv->threads);
 
     pv->frame = calloc(pv->threads + pv->max_frames, sizeof(Frame));
     for (int ii = 0; ii < pv->threads + pv->max_frames; ii++)
@@ -1031,6 +1043,7 @@ static int nlmeans_init(hb_filter_object_t *filter,
             goto fail;
         }
     }
+    pv->output = *init;
 
     return 0;
 
@@ -1089,7 +1102,7 @@ static void nlmeans_filter_thread(void *thread_args_v)
     hb_filter_private_t *pv = thread_data->pv;
     int segment = thread_data->segment;
 
-    hb_log("NLMeans thread started for segment %d", segment);
+    hb_deep_log(3, "NLMeans thread started for segment %d", segment);
 
     while (1)
     {
@@ -1103,7 +1116,13 @@ static void nlmeans_filter_thread(void *thread_args_v)
 
         Frame *frame = &pv->frame[segment];
         hb_buffer_t *buf;
-        buf = hb_frame_buffer_init(frame->fmt, frame->width, frame->height);
+        buf = hb_frame_buffer_init(pv->output.pix_fmt,
+                                   frame->width, frame->height);
+        buf->f.color_prim     = pv->output.color_prim;
+        buf->f.color_transfer = pv->output.color_transfer;
+        buf->f.color_matrix   = pv->output.color_matrix;
+        buf->f.color_range    = pv->output.color_range ;
+
 
         NLMeansFunctions *functions = &pv->functions;
 
@@ -1234,7 +1253,12 @@ static hb_buffer_t * nlmeans_filter_flush(hb_filter_private_t *pv)
     {
         Frame *frame = &pv->frame[f];
         hb_buffer_t *buf;
-        buf = hb_frame_buffer_init(frame->fmt, frame->width, frame->height);
+        buf = hb_frame_buffer_init(pv->output.pix_fmt,
+                                   frame->width, frame->height);
+        buf->f.color_prim     = pv->output.color_prim;
+        buf->f.color_transfer = pv->output.color_transfer;
+        buf->f.color_matrix   = pv->output.color_matrix;
+        buf->f.color_range    = pv->output.color_range ;
 
         NLMeansFunctions *functions = &pv->functions;
 

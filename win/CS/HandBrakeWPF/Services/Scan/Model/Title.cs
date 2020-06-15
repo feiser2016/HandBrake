@@ -127,6 +127,19 @@ namespace HandBrakeWPF.Services.Scan.Model
         /// </summary>
         public string SourceName { get; set; }
 
+        public string DisplaySourceName
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(this.SourceName))
+                {
+                    return Path.GetFileNameWithoutExtension(this.SourceName);
+                }
+
+                return null;
+            }
+        }
+
         public string SourceDisplayName
         {
             get
@@ -149,7 +162,7 @@ namespace HandBrakeWPF.Services.Scan.Model
             get
             {
                 return string.Format(
-                    "{0}{1} ({2:00}:{3:00}:{4:00}) {5}",
+                    "{0} {1} ({2:00}:{3:00}:{4:00}) {5}",
                     this.TitleNumber,
                     this.Playlist,
                     this.Duration.Hours,
@@ -164,7 +177,7 @@ namespace HandBrakeWPF.Services.Scan.Model
             get
             {
                 return string.Format(
-                    "{0}{1} ({2:00}:{3:00}:{4:00})",
+                    "{0} {1} ({2:00}:{3:00}:{4:00})",
                     this.TitleNumber,
                     this.Playlist,
                     this.Duration.Hours,
@@ -203,7 +216,7 @@ namespace HandBrakeWPF.Services.Scan.Model
                 this.Playlist = string.Format(" {0}", this.Playlist);
             }
 
-            return string.Format("{0}{1} ({2:00}:{3:00}:{4:00})", this.TitleNumber, this.Playlist, this.Duration.Hours, this.Duration.Minutes, this.Duration.Seconds);
+            return string.Format("{0} {1} ({2:00}:{3:00}:{4:00})", this.TitleNumber, this.Playlist, this.Duration.Hours, this.Duration.Minutes, this.Duration.Seconds);
         }
     }
 }

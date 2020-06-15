@@ -1,50 +1,58 @@
 /* vce_common.c
  *
- * Copyright (c) 2003-2018 HandBrake Team
+ * Copyright (c) 2003-2020 HandBrake Team
  * This file is part of the HandBrake source code.
  * Homepage: <http://handbrake.fr/>.
  * It may be used under the terms of the GNU General Public License v2.
  * For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#ifdef USE_VCE
+#include "handbrake/project.h"
+
+#if HB_PROJECT_FEATURE_VCE
 #include "AMF/core/Factory.h"
-#include "AMF/components/VideoDecoderUVD.h"
-#include "hb.h"
+#include "AMF/components/VideoEncoderVCE.h"
+#include "AMF/components/VideoEncoderHEVC.h"
+#include "handbrake/handbrake.h"
 
 AMF_RESULT check_component_available(const wchar_t *componentID)
 {
-    amf_handle          library = NULL;
-    AMFInit_Fn          init_fun;
+    amf_handle          libHandle = NULL;
+    AMFInit_Fn          initFun;
     AMFFactory         *factory = NULL;
     AMFContext         *context = NULL;
+    AMFContext1        *context1 = NULL;
     AMFComponent       *encoder = NULL;
     AMFCaps            *encoderCaps = NULL;
     AMF_RESULT          result = AMF_FAIL;
 
-    library = hb_dlopen(AMF_DLL_NAMEA);
-    if(!library)
+    libHandle = hb_dlopen(AMF_DLL_NAMEA);
+
+    if(!libHandle)
     {
         result =  AMF_FAIL;
         goto clean;
     }
 
-    init_fun = (AMFInit_Fn)(hb_dlsym(library, AMF_INIT_FUNCTION_NAME));
-    if(!init_fun)
+    initFun = (AMFInit_Fn)(hb_dlsym(libHandle, AMF_INIT_FUNCTION_NAME));
+    if(!initFun)
     {
         result = AMF_FAIL;
+        hb_error("VCE: Load Library Failed");
         goto clean;
     }
 
-    result = init_fun(AMF_FULL_VERSION, &factory);
+    result = initFun(AMF_FULL_VERSION, &factory);
     if(result != AMF_OK)
     {
+        hb_error("VCE: Init Failed");
         goto clean;
     }
 
     result = factory->pVtbl->CreateContext(factory, &context);
     if(result != AMF_OK)
     {
+        hb_error("VCE: Context Failed");
         goto clean;
     }
 
@@ -52,11 +60,26 @@ AMF_RESULT check_component_available(const wchar_t *componentID)
     if (result != AMF_OK) {
         result = context->pVtbl->InitDX9(context, NULL);
         if (result != AMF_OK) {
-            goto clean;
+            AMFGuid guid = IID_AMFContext1();
+            result = context->pVtbl->QueryInterface(context, &guid, (void**)&context1);
+            if (result != AMF_OK) {
+                hb_error("VCE: CreateContext1() failed");
+                goto clean;
+            }
+
+            result = context1->pVtbl->InitVulkan(context1, NULL);
+            if (result != AMF_OK) {
+                if (result == AMF_NOT_SUPPORTED)
+                    hb_error("VCE: AMF via Vulkan is not supported on the given device.\n");
+                else
+                    hb_error("VCE: AMF failed to initialise on the given Vulkan device.\n");
+                goto clean;
+            }
         }
     }
 
     result = factory->pVtbl->CreateComponent(factory, context, componentID, &encoder);
+
     if(result != AMF_OK)
     {
         goto clean;
@@ -83,9 +106,15 @@ clean:
         context->pVtbl->Release(context);
         context = NULL;
     }
-    if(library)
+    if (context1)
     {
-        hb_dlclose(library);
+        context1->pVtbl->Terminate(context1);
+        context1->pVtbl->Release(context1);
+        context1 = NULL;
+    }
+    if(libHandle)
+    {
+        hb_dlclose(libHandle);
     }
 
     return result;
@@ -93,15 +122,25 @@ clean:
 
 int hb_vce_h264_available()
 {
-    return (check_component_available(AMFVideoDecoderUVD_H264_AVC) == AMF_OK) ? 1 : 0;
+    if (is_hardware_disabled())
+    {
+        return 0;
+    }
+
+    return (check_component_available(AMFVideoEncoderVCE_AVC) == AMF_OK) ? 1 : 0;
 }
 
 int hb_vce_h265_available()
 {
-    return (check_component_available(AMFVideoDecoderHW_H265_HEVC) == AMF_OK) ? 1 : 0;
+    if (is_hardware_disabled())
+    {
+        return 0;
+    }
+
+    return (check_component_available(AMFVideoEncoder_HEVC) == AMF_OK) ? 1 : 0;
 }
 
-#else
+#else // !HB_PROJECT_FEATURE_VCE
 
 int hb_vce_h264_available()
 {
@@ -113,4 +152,4 @@ int hb_vce_h265_available()
     return 0;
 }
 
-#endif // USE_QSV
+#endif // HB_PROJECT_FEATURE_VCE

@@ -141,35 +141,26 @@
         const char *encoder_options = NULL;
         const char *encoder_profile = NULL;
         const char *encoder_level   = NULL;
-        if (self.video.advancedOptions)
+
+        // we are using the x264/x265 preset system
+        if ([(tmpString = self.video.completeTune) length])
         {
-            // we are using the advanced panel
-            if ([(tmpString = self.video.videoOptionExtra) length])
-            {
-                encoder_options = tmpString.UTF8String;
-            }
+            encoder_tune = [tmpString UTF8String];
         }
-        else
+        if ([(tmpString = self.video.videoOptionExtra) length])
         {
-            // we are using the x264/x265 preset system
-            if ([(tmpString = self.video.completeTune) length])
-            {
-                encoder_tune = [tmpString UTF8String];
-            }
-            if ([(tmpString = self.video.videoOptionExtra) length])
-            {
-                encoder_options = [tmpString UTF8String];
-            }
-            if ([(tmpString = self.video.profile) length])
-            {
-                encoder_profile = [tmpString UTF8String];
-            }
-            if ([(tmpString = self.video.level) length])
-            {
-                encoder_level = [tmpString UTF8String];
-            }
-            encoder_preset = self.video.preset.UTF8String;
+            encoder_options = [tmpString UTF8String];
         }
+        if ([(tmpString = self.video.profile) length])
+        {
+            encoder_profile = [tmpString UTF8String];
+        }
+        if ([(tmpString = self.video.level) length])
+        {
+            encoder_level = [tmpString UTF8String];
+        }
+        encoder_preset = self.video.preset.UTF8String;
+
         hb_job_set_encoder_preset (job, encoder_preset);
         hb_job_set_encoder_tune   (job, encoder_tune);
         hb_job_set_encoder_options(job, encoder_options);
@@ -263,31 +254,32 @@
             }
             else
             {
-                // if we are getting the subtitles from an external srt file
-                if (subTrack.type == SRTSUB)
+                // if we are getting the subtitles from an external file
+                if (subTrack.type == IMPORTSRT || subTrack.type == IMPORTSSA)
                 {
                     hb_subtitle_config_t sub_config;
+                    int type = subTrack.type;
 
+                    sub_config.name = subTrack.title.UTF8String;
                     sub_config.offset = subTrack.offset;
 
                     // we need to strncpy file name and codeset
-                    strncpy(sub_config.src_filename, subTrack.fileURL.fileSystemRepresentation, 255);
-                    sub_config.src_filename[255] = 0;
+                    sub_config.src_filename = subTrack.fileURL.fileSystemRepresentation;
                     strncpy(sub_config.src_codeset, subTrack.charCode.UTF8String, 39);
                     sub_config.src_codeset[39] = 0;
 
-                    if (!subTrack.burnedIn && hb_subtitle_can_pass(SRTSUB, job->mux))
+                    if (!subTrack.burnedIn && hb_subtitle_can_pass(type, job->mux))
                     {
                         sub_config.dest = PASSTHRUSUB;
                     }
-                    else if (hb_subtitle_can_burn(SRTSUB))
+                    else if (hb_subtitle_can_burn(type))
                     {
                         sub_config.dest = RENDERSUB;
                     }
 
                     sub_config.force = 0;
                     sub_config.default_track = subTrack.def;
-                    hb_srt_add( job, &sub_config, subTrack.isoLanguage.UTF8String);
+                    hb_import_subtitle_add( job, &sub_config, subTrack.isoLanguage.UTF8String, type);
                 }
                 else
                 {
@@ -297,6 +289,7 @@
                     if (subt != NULL)
                     {
                         hb_subtitle_config_t sub_config = subt->config;
+                        sub_config.name = subTrack.title.UTF8String;
 
                         if (!subTrack.burnedIn && hb_subtitle_can_pass(subt->source, job->mux))
                         {
@@ -365,10 +358,10 @@
             hb_audio_config_t *audio = (hb_audio_config_t *)calloc(1, sizeof(*audio));
             hb_audio_config_init(audio);
 
-            NSDictionary *inputTrack = self.audio.sourceTracks[audioTrack.sourceTrackIdx];
+            HBTitleAudioTrack *inputTrack = self.audio.sourceTracks[audioTrack.sourceTrackIdx];
 
             int sampleRateToUse = (audioTrack.sampleRate == 0 ?
-                                   [inputTrack[keyAudioInputSampleRate] intValue] :
+                                   inputTrack.sampleRate :
                                    audioTrack.sampleRate);
 
             audio->in.track = (int)audioTrack.sourceTrackIdx - 1;
@@ -382,6 +375,7 @@
             audio->out.bitrate                   = audioTrack.bitRate;
             audio->out.samplerate                = sampleRateToUse;
             audio->out.dither_method             = hb_audio_dither_get_default();
+            audio->out.name                      = audioTrack.title.UTF8String;
 
             // output is not passthru so apply gain
             if (!(audioTrack.encoder & HB_ACODEC_PASS_FLAG))
@@ -394,8 +388,8 @@
                 audio->out.gain = 0;
             }
 
-            if (hb_audio_can_apply_drc([inputTrack[keyAudioInputCodec] intValue],
-                                       [inputTrack[keyAudioInputCodecParam] intValue],
+            if (hb_audio_can_apply_drc(inputTrack.codec,
+                                       inputTrack.codecParam,
                                        audioTrack.encoder))
             {
                 audio->out.dynamic_range_compression = audioTrack.drc;
@@ -477,11 +471,17 @@
         hb_dict_free(&filter_dict);
     }
 
-    // Deblock (uses pp7 default)
-    if (self.filters.deblock)
+    // Deblock
+    if (![self.filters.deblock isEqualToString:@"off"])
     {
-        filter = hb_filter_init(HB_FILTER_DEBLOCK);
-        hb_add_filter(job, filter, [NSString stringWithFormat:@"qp=%d", self.filters.deblock].UTF8String);
+        int filter_id = HB_FILTER_DEBLOCK;
+        hb_dict_t *filter_dict = hb_generate_filter_settings(filter_id,
+                                                             self.filters.deblock.UTF8String,
+                                                             self.filters.deblockTune.UTF8String,
+                                                             self.filters.deblockCustomString.UTF8String);
+        filter = hb_filter_init(filter_id);
+        hb_add_filter_dict(job, filter, filter_dict);
+        hb_value_free(&filter_dict);
     }
 
     // Add Crop/Scale filter
@@ -535,7 +535,7 @@
     filter = hb_filter_init(HB_FILTER_VFR);
     hb_add_filter(job, filter, [[NSString stringWithFormat:@"mode=%d:rate=%d/%d",
                                  fps_mode, fps_num, fps_den] UTF8String]);
-    
+
     return job;
 }
 

@@ -1,13 +1,12 @@
 /*
  * presets.h
- * Copyright (C) John Stebbins 2008-2018 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2020 <stebbins@stebbins>
  *
  * presets.h is free software.
  *
  * You may redistribute it and/or modify it under the terms of the
- * GNU General Public License, as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option)
- * any later version.
+ * GNU General Public License version 2, as published by the Free Software
+ * Foundation.
  *
  * presets.h is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -24,7 +23,7 @@
 #if !defined(_GHB_PRESETS_H_)
 #define _GHB_PRESETS_H_
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 #include "values.h"
 
 void ghb_presets_load(signal_user_data_t *ud);

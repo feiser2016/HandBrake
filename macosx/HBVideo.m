@@ -9,7 +9,7 @@
 #import "HBCodingUtilities.h"
 #import "HBMutablePreset.h"
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 
 NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
 
@@ -28,7 +28,7 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
 
 @implementation HBVideo
 
-- (instancetype)initWithJob:(HBJob *)job;
+- (instancetype)initWithJob:(HBJob *)job
 {
     self = [super init];
     if (self) {
@@ -39,9 +39,11 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
         _job = job;
 
         _preset = @"medium";
-        _tune = @"";
+        _tune = @"none";
         _profile = @"auto";
         _level = @"auto";
+
+        _videoOptionExtra = @"";
 
         [self updateQualityBounds];
 
@@ -105,8 +107,8 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
 
     if (!(self.undo.isUndoing || self.undo.isRedoing))
     {
+        [self validateQualityType];
         [self validatePresetsSettings];
-        [self validateAdvancedOptions];
         [self validateVideoOptionExtra:previousEncoder];
     }
 
@@ -202,7 +204,7 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
 
     if (!encoderSupported)
     {
-        self.encoder = HB_VCODEC_X264;
+        self.encoder = hb_video_encoder_get_default(self.job.container);
     }
 }
 
@@ -223,13 +225,13 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
         [[self.undo prepareWithInvocationTarget:self] setTune:_tune];
     }
 
-    if (![tune isEqualToString:@"none"])
+    if (tune == nil || [tune isEqualToString:@""])
     {
-        _tune = [tune copy];
+        _tune = @"none";
     }
     else
     {
-        _tune = @"";
+        _tune = [tune copy];
     }
 
     [self postChangedNotification];
@@ -282,11 +284,40 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     [self postChangedNotification];
 }
 
+- (void)validateQualityType
+{
+    if (self.qualityType != 0)
+    {
+        int direction;
+        float minValue, maxValue, granularity;
+        hb_video_quality_get_limits(self.encoder,
+                                    &minValue, &maxValue, &granularity, &direction);
+
+        if (minValue == 0 && maxValue == 0)
+        {
+            self.qualityType = 0;
+        }
+    }
+
+    if ((self.encoder & HB_VCODEC_FFMPEG_VT_H264) ||
+        (self.encoder & HB_VCODEC_FFMPEG_VT_H265))
+    {
+        self.twoPass = NO;
+    }
+}
+
 - (void)validatePresetsSettings
 {
     NSArray *presets = self.presets;
     if (presets.count && ![presets containsObject:self.preset]) {
-        self.preset = presets[self.mediumPresetIndex];
+        if (presets.count > self.mediumPresetIndex)
+        {
+            self.preset = presets[self.mediumPresetIndex];
+        }
+        else
+        {
+            self.preset = presets.firstObject;
+        }
     }
 
     NSArray *tunes = self.tunes;
@@ -303,13 +334,10 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     if (levels.count && ![levels containsObject:self.level]) {
         self.level = levels.firstObject;
     }
-}
 
-- (void)validateAdvancedOptions
-{
-    if (self.encoder != HB_VCODEC_H264_MASK)
+    if (!(self.encoder & HB_VCODEC_X264_MASK))
     {
-        self.advancedOptions = NO;
+        self.fastDecode = NO;
     }
 }
 
@@ -358,9 +386,9 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     return [NSSet setWithObjects:@"encoder", nil];
 }
 
-- (NSArray *)tunes
+- (NSArray<NSString *> *)tunes
 {
-    NSMutableArray *temp = [NSMutableArray array];
+    NSMutableArray<NSString *> *temp = [NSMutableArray array];
 
     [temp addObject:@"none"];
 
@@ -369,7 +397,7 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     for (int i = 0; tunes != NULL && tunes[i] != NULL; i++)
     {
         // we filter out "fastdecode" as we have a dedicated checkbox for it
-        if (strcasecmp(tunes[i], "fastdecode") != 0)
+        if (!(self.encoder & HB_VCODEC_X264_MASK) || strcasecmp(tunes[i], "fastdecode") != 0)
         {
             [temp addObject:@(tunes[i])];
         }
@@ -383,9 +411,9 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     return [NSSet setWithObjects:@"encoder", nil];
 }
 
-- (NSArray *)profiles
+- (NSArray<NSString *> *)profiles
 {
-    NSMutableArray *temp = [NSMutableArray array];
+    NSMutableArray<NSString *> *temp = [NSMutableArray array];
 
     const char * const *profiles = hb_video_encoder_get_profiles(self.encoder);
     for (int i = 0; profiles != NULL && profiles[i] != NULL; i++)
@@ -405,9 +433,9 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     return [NSSet setWithObjects:@"encoder", nil];
 }
 
-- (NSArray *)levels
+- (NSArray<NSString *> *)levels
 {
-    NSMutableArray *temp = [NSMutableArray array];
+    NSMutableArray<NSString *> *temp = [NSMutableArray array];
 
     const char * const *levels = hb_video_encoder_get_levels(self.encoder);
     for (int i = 0; levels != NULL && levels[i] != NULL; i++)
@@ -445,7 +473,6 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
         copy->_twoPass = _twoPass;
         copy->_turboTwoPass = _turboTwoPass;
 
-        copy->_advancedOptions = _advancedOptions;
         copy->_preset = [_preset copy];
         copy->_tune = [_tune copy];
         copy->_profile = [_profile copy];
@@ -468,11 +495,11 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
 
 - (void)encodeWithCoder:(NSCoder *)coder
 {
-    [coder encodeInt:1 forKey:@"HBVideoVersion"];
+    [coder encodeInt:2 forKey:@"HBVideoVersion"];
 
     encodeInt(_encoder);
 
-    encodeInt(_qualityType);
+    encodeInteger(_qualityType);
     encodeInt(_avgBitrate);
     encodeDouble(_quality);
 
@@ -480,12 +507,11 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
     encodeDouble(_qualityMaxValue);
 
     encodeInt(_frameRate);
-    encodeInt(_frameRateMode);
+    encodeInteger(_frameRateMode);
 
     encodeBool(_twoPass);
     encodeBool(_turboTwoPass);
 
-    encodeBool(_advancedOptions);
     encodeObject(_preset);
     encodeObject(_tune);
     encodeObject(_profile);
@@ -502,20 +528,18 @@ NSString * const HBVideoChangedNotification = @"HBVideoChangedNotification";
 
     decodeInt(_encoder);
 
-    decodeInt(_qualityType);
-    decodeInt(_avgBitrate);
+    decodeInteger(_qualityType); if (_qualityType < HBVideoQualityTypeAvgBitrate || _qualityType > HBVideoQualityTypeConstantQuality) { goto fail; }
+    decodeInt(_avgBitrate); if (_avgBitrate < 0) { goto fail; }
     decodeDouble(_quality);
 
     decodeDouble(_qualityMinValue);
     decodeDouble(_qualityMaxValue);
 
-    decodeInt(_frameRate);
-    decodeInt(_frameRateMode);
-
+    decodeInt(_frameRate); if (_frameRate < 0) { goto fail; }
+    decodeInteger(_frameRateMode); if (_frameRateMode < HBVideoFrameRateModeVFR_PFR || _frameRateMode > HBVideoFrameRateModeCFR) { goto fail; }
     decodeBool(_twoPass);
     decodeBool(_turboTwoPass);
 
-    decodeBool(_advancedOptions);
     decodeObjectOrFail(_preset, NSString);
     decodeObjectOrFail(_tune, NSString);
     decodeObjectOrFail(_profile, NSString);
@@ -554,7 +578,7 @@ fail:
 {
     NSMutableString *string = [[NSMutableString alloc] init];
 
-    if (self.tune)
+    if (self.tune && ![self.tune isEqualToString:@"none"])
     {
         [string appendString:self.tune];
     }
@@ -591,14 +615,12 @@ fail:
             self.fastDecode = NO;
 
             self.videoOptionExtra = preset[@"VideoOptionExtra"];
-            self.advancedOptions = YES;
         }
         else
         {
             // x264UseAdvancedOptions is set to 0 (disabled),
             // so we use the new preset system and
             // disable the advanced panel
-            self.advancedOptions = NO;
 
             self.preset = preset[@"VideoPreset"];
             self.tune   = preset[@"VideoTune"];
@@ -693,17 +715,7 @@ fail:
         preset[@"VideoOptionExtra"] = self.videoOptionExtra;
         preset[@"VideoProfile"]     = self.profile;
         preset[@"VideoLevel"]       = self.level;
-
-        // x264 Options, this will either be advanced panel or the video tabs x264 presets panel with modded option string
-        if (self.advancedOptions)
-        {
-            // use the old advanced panel.
-            preset[@"x264UseAdvancedOptions"] = @YES;
-        }
-        else
-        {
-            preset[@"x264UseAdvancedOptions"] = @NO;
-        }
+        preset[@"x264UseAdvancedOptions"] = @NO;
     }
     else
     {

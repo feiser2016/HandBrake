@@ -1,24 +1,32 @@
 /* qsv_common.c
  *
- * Copyright (c) 2003-2018 HandBrake Team
+ * Copyright (c) 2003-2020 HandBrake Team
  * This file is part of the HandBrake source code.
  * Homepage: <http://handbrake.fr/>.
  * It may be used under the terms of the GNU General Public License v2.
  * For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#ifdef USE_QSV
+#include "handbrake/project.h"
+
+#if HB_PROJECT_FEATURE_QSV
 
 #include <stdio.h>
 #include <string.h>
 
-#include "hb.h"
-#include "ports.h"
-#include "common.h"
-#include "hb_dict.h"
-#include "qsv_common.h"
-#include "h264_common.h"
-#include "h265_common.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/ports.h"
+#include "handbrake/common.h"
+#include "handbrake/hb_dict.h"
+#include "handbrake/qsv_common.h"
+#include "handbrake/h264_common.h"
+#include "handbrake/h265_common.h"
+#include "handbrake/hbffmpeg.h"
+#include "libavfilter/avfilter.h"
+#include "libavfilter/buffersrc.h"
+#include "libavfilter/buffersink.h"
+#include "libavutil/hwcontext_qsv.h"
+#include "libavutil/hwcontext.h"
 
 // QSV info for each codec
 static hb_qsv_info_t *hb_qsv_info_avc       = NULL;
@@ -92,6 +100,8 @@ static hb_triplet_t hb_qsv_h265_levels[] =
     { NULL,                            },
 };
 
+#define MFX_IMPL_VIA_MASK(impl) (0x0f00 & (impl))
+
 // check available Intel Media SDK version against a minimum
 #define HB_CHECK_MFX_VERSION(MFX_VERSION, MAJOR, MINOR) \
     (MFX_VERSION.Major == MAJOR  && MFX_VERSION.Minor >= MINOR)
@@ -110,6 +120,7 @@ enum
     QSV_G4, // Broadwell or equivalent
     QSV_G5, // Skylake or equivalent
     QSV_G6, // Kaby Lake or equivalent
+    QSV_G7, // Ice Lake or equivalent
     QSV_FU, // always last (future processors)
 };
 static int qsv_hardware_generation(int cpu_platform)
@@ -132,6 +143,8 @@ static int qsv_hardware_generation(int cpu_platform)
             return QSV_G5;
         case HB_CPU_PLATFORM_INTEL_KBL:
             return QSV_G6;
+        case HB_CPU_PLATFORM_INTEL_ICL:
+            return QSV_G7;
         default:
             return QSV_FU;
     }
@@ -147,6 +160,11 @@ static int qsv_implementation_is_hardware(mfxIMPL implementation)
 
 int hb_qsv_available()
 {
+    if (is_hardware_disabled())
+    {
+        return 0;
+    }
+
     return ((hb_qsv_video_encoder_is_enabled(HB_VCODEC_QSV_H264) ? HB_VCODEC_QSV_H264 : 0) |
             (hb_qsv_video_encoder_is_enabled(HB_VCODEC_QSV_H265) ? HB_VCODEC_QSV_H265 : 0) |
             (hb_qsv_video_encoder_is_enabled(HB_VCODEC_QSV_H265_10BIT) ? HB_VCODEC_QSV_H265_10BIT : 0));
@@ -311,13 +329,15 @@ static int query_capabilities(mfxSession session, mfxVersion version, hb_qsv_inf
         }
         else
         {
+            mfxStatus mfxRes;
             init_video_param(&inputParam);
             inputParam.mfx.CodecId = info->codec_id;
 
             memset(&videoParam, 0, sizeof(mfxVideoParam));
             videoParam.mfx.CodecId = inputParam.mfx.CodecId;
 
-            if (MFXVideoENCODE_Query(session, &inputParam, &videoParam) >= MFX_ERR_NONE &&
+            mfxRes = MFXVideoENCODE_Query(session, &inputParam, &videoParam);
+            if (mfxRes >= MFX_ERR_NONE &&
                 videoParam.mfx.CodecId == info->codec_id)
             {
                 /*
@@ -366,7 +386,12 @@ static int query_capabilities(mfxSession session, mfxVersion version, hb_qsv_inf
                 {
                     info->capabilities |= HB_QSV_CAP_B_REF_PYRAMID;
                 }
-            }
+                if (info->codec_id == MFX_CODEC_HEVC &&
+                    qsv_hardware_generation(hb_get_cpu_platform()) >= QSV_G7)
+                {
+                    info->capabilities |= HB_QSV_CAP_LOWPOWER_ENCODE;
+                }
+             }
             else
             {
                 if (HB_CHECK_MFX_VERSION(version, 1, 6))
@@ -631,6 +656,14 @@ static int query_capabilities(mfxSession session, mfxVersion version, hb_qsv_inf
     return 0;
 }
 
+const char * DRM_INTEL_DRIVER_NAME = "i915";
+const char * VA_INTEL_DRIVER_NAMES[] = { "iHD", "i965", NULL};
+
+hb_display_t * hb_qsv_display_init(void)
+{
+    return hb_display_init(DRM_INTEL_DRIVER_NAME, VA_INTEL_DRIVER_NAMES);
+}
+
 int hb_qsv_info_init()
 {
     static int init_done = 0;
@@ -647,7 +680,7 @@ int hb_qsv_info_init()
      */
     mfxSession session;
     mfxVersion version = { .Major = 1, .Minor = 0, };
-#ifdef SYS_LINUX
+#if defined(SYS_LINUX) || defined(SYS_FREEBSD)
     mfxIMPL hw_preference = MFX_IMPL_VIA_ANY;
 #else
     mfxIMPL hw_preference = MFX_IMPL_VIA_D3D11;
@@ -675,6 +708,15 @@ int hb_qsv_info_init()
     do{
         if (MFXInit(MFX_IMPL_HARDWARE_ANY | hw_preference, &version, &session) == MFX_ERR_NONE)
         {
+            // On linux, the handle to the VA display must be set.
+            // This code is essentiall a NOP other platforms.
+            hb_display_t * display = hb_qsv_display_init();
+
+            if (display != NULL)
+            {
+                MFXVideoCORE_SetHandle(session, display->mfxType,
+                                       (mfxHDL)display->handle);
+            }
             // Media SDK hardware found, but check that our minimum is supported
             //
             // Note: this-party hardware (QSV_G0) is unsupported for the time being
@@ -692,12 +734,13 @@ int hb_qsv_info_init()
                 // available, we can set the preferred implementation
                 hb_qsv_impl_set_preferred("hardware");
             }
+            hb_display_close(&display);
             MFXClose(session);
             hw_preference = 0;
         }
         else
         {
-#ifndef SYS_LINUX
+#if !defined(SYS_LINUX) && !defined(SYS_FREEBSD)
             // Windows only: After D3D11 we will try D3D9
             if (hw_preference == MFX_IMPL_VIA_D3D11)
                 hw_preference = MFX_IMPL_VIA_D3D9;
@@ -887,24 +930,22 @@ hb_list_t* hb_qsv_load_plugins(hb_qsv_info_t *info, mfxSession session, mfxVersi
 
     if (HB_CHECK_MFX_VERSION(version, 1, 8))
     {
-        if (info->codec_id == MFX_CODEC_HEVC)
+        if (info->codec_id == MFX_CODEC_HEVC && !(qsv_hardware_generation(hb_get_cpu_platform()) < QSV_G5))
         {
             if (HB_CHECK_MFX_VERSION(version, 1, 15) &&
                 qsv_implementation_is_hardware(info->implementation))
             {
-                if (MFXVideoUSER_Load(session, &MFX_PLUGINID_HEVCE_HW, 0) < MFX_ERR_NONE)
+                if (MFXVideoUSER_Load(session, &MFX_PLUGINID_HEVCE_HW, 0) == MFX_ERR_NONE)
                 {
-                    goto fail;
+                    hb_list_add(mfxPluginList, (void*)&MFX_PLUGINID_HEVCE_HW);
                 }
-                hb_list_add(mfxPluginList, (void*)&MFX_PLUGINID_HEVCE_HW);
             }
             else if (HB_CHECK_MFX_VERSION(version, 1, 15))
             {
-                if (MFXVideoUSER_Load(session, &MFX_PLUGINID_HEVCE_SW, 0) < MFX_ERR_NONE)
+                if (MFXVideoUSER_Load(session, &MFX_PLUGINID_HEVCE_SW, 0) == MFX_ERR_NONE)
                 {
-                    goto fail;
+                    hb_list_add(mfxPluginList, (void*)&MFX_PLUGINID_HEVCE_SW);
                 }
-                hb_list_add(mfxPluginList, (void*)&MFX_PLUGINID_HEVCE_SW);
             }
         }
     }
@@ -955,7 +996,30 @@ const char* hb_qsv_decode_get_codec_name(enum AVCodecID codec_id)
 int hb_qsv_decode_is_enabled(hb_job_t *job)
 {
     return ((job != NULL && job->qsv.decode) &&
-            (job->title->video_decode_support & HB_DECODE_SUPPORT_QSV));
+            (job->title->video_decode_support & HB_DECODE_SUPPORT_QSV)) &&
+            (job->vcodec == HB_VCODEC_QSV_H265 ? (qsv_hardware_generation(hb_get_cpu_platform()) >= QSV_G5) : 1) &&
+            (job->vcodec == HB_VCODEC_QSV_H265_10BIT ? (qsv_hardware_generation(hb_get_cpu_platform()) >= QSV_G6) : 1);
+}
+
+static int hb_dxva2_device_check();
+static int hb_d3d11va_device_check();
+
+int hb_qsv_full_path_is_enabled(hb_job_t *job)
+{
+    static int device_check_completed = 0;
+    static int device_check_succeded = 0;
+    int filter_count = hb_list_count(job->list_filter);
+
+    if(!device_check_completed)
+    {
+       device_check_succeded = ((hb_d3d11va_device_check() >= 0)
+        || (hb_dxva2_device_check() == 0)) ? 1 : 0;
+       device_check_completed = 1;
+    }
+    return (hb_qsv_decode_is_enabled(job) &&
+        hb_qsv_info_get(job->vcodec) &&
+        device_check_succeded &&
+        (filter_count == 0));
 }
 
 int hb_qsv_copyframe_is_slow(int encoder)
@@ -1546,7 +1610,22 @@ int hb_qsv_param_parse(hb_qsv_param_t *param, hb_qsv_info_t *info,
             return HB_QSV_PARAM_UNSUPPORTED;
         }
     }
-    else
+    else if (!strcasecmp(key, "lowpower"))
+    {
+        if (info->capabilities & HB_QSV_CAP_LOWPOWER_ENCODE)
+        {
+            ivalue = hb_qsv_atobool(value, &error);
+            if (!error)
+            {
+                param->videoParam->mfx.LowPower = ivalue ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+            }
+        }
+        else
+        {
+            return HB_QSV_PARAM_UNSUPPORTED;
+        }
+    }
+     else
     {
         /*
          * TODO:
@@ -1594,7 +1673,7 @@ int hb_qsv_profile_parse(hb_qsv_param_t *param, hb_qsv_info_t *info, const char 
         param->videoParam->mfx.CodecProfile = profile->value;
     }
     /* HEVC 10 bits defautls to Main 10 */
-    else if (((profile_key != NULL && !strcasecmp(profile_key, "auto")) || profile_key == NULL) && 
+    else if (((profile_key != NULL && !strcasecmp(profile_key, "auto")) || profile_key == NULL) &&
               codec == HB_VCODEC_QSV_H265_10BIT &&
               param->videoParam->mfx.CodecId == MFX_CODEC_HEVC &&
               qsv_hardware_generation(hb_get_cpu_platform()) >= QSV_G6)
@@ -1953,6 +2032,7 @@ int hb_qsv_param_default(hb_qsv_param_t *param, mfxVideoParam *videoParam,
         param->videoParam->mfx.NumRefFrame  = 0; // use Media SDK default
         param->videoParam->mfx.GopPicSize   = 0; // use Media SDK default
         param->videoParam->mfx.GopRefDist   = 0; // use Media SDK default
+        param->videoParam->mfx.LowPower     = MFX_CODINGOPTION_OFF; // use Media SDK default
         // introduced in API 1.1
         param->videoParam->AsyncDepth = HB_QSV_ASYNC_DEPTH_DEFAULT;
         // introduced in API 1.3
@@ -1975,6 +2055,10 @@ int hb_qsv_param_default(hb_qsv_param_t *param, mfxVideoParam *videoParam,
         if (info->capabilities & HB_QSV_CAP_OPTION2)
         {
             param->videoParam->ExtParam[param->videoParam->NumExtParam++] = (mfxExtBuffer*)&param->codingOption2;
+        }
+        if (info->capabilities & HB_QSV_CAP_LOWPOWER_ENCODE)
+        {
+            param->videoParam->mfx.LowPower = MFX_CODINGOPTION_ON;
         }
     }
     else
@@ -2196,13 +2280,13 @@ const char* hb_qsv_impl_get_name(int impl)
 
 const char* hb_qsv_impl_get_via_name(int impl)
 {
-    if (impl & MFX_IMPL_VIA_VAAPI)
+    if      ((impl & 0xF00) == MFX_IMPL_VIA_VAAPI)
         return "via VAAPI";
-    else if (impl & MFX_IMPL_VIA_D3D11)
+    else if ((impl & 0xF00) == MFX_IMPL_VIA_D3D11)
         return "via D3D11";
-    else if (impl & MFX_IMPL_VIA_D3D9)
+    else if ((impl & 0xF00) == MFX_IMPL_VIA_D3D9)
         return "via D3D9";
-    else if (impl & MFX_IMPL_VIA_ANY)
+    else if ((impl & 0xF00) == MFX_IMPL_VIA_ANY)
         return "via ANY";
     else return NULL;
 }
@@ -2217,6 +2301,762 @@ void hb_qsv_force_workarounds()
 #undef FORCE_WORKAROUNDS
 }
 
+AVBufferRef *enc_hw_frames_ctx = NULL;
+extern EncQSVFramesContext hb_enc_qsv_frames_ctx;
+AVBufferRef *hb_hw_device_ctx = NULL;
+char *qsv_device = NULL;
+static mfxHDL device_manager_handle = NULL;
+static mfxHandleType device_manager_handle_type;
+
+#if defined(_WIN32) || defined(__MINGW32__)
+// Direct X
+#define COBJMACROS
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <d3d9.h>
+#include <dxva2api.h>
+
+#if HAVE_DXGIDEBUG_H
+#include <dxgidebug.h>
+#endif
+
+static ID3D11DeviceContext *device_context = NULL;
+
+typedef IDirect3D9* WINAPI pDirect3DCreate9(UINT);
+typedef HRESULT WINAPI pDirect3DCreate9Ex(UINT, IDirect3D9Ex **);
+typedef HRESULT(WINAPI *HB_PFN_CREATE_DXGI_FACTORY)(REFIID riid, void **ppFactory);
+
+static int hb_dxva2_device_create9(HMODULE d3dlib, UINT adapter, IDirect3D9 **d3d9_out)
+{
+    pDirect3DCreate9 *createD3D = (pDirect3DCreate9 *)hb_dlsym(d3dlib, "Direct3DCreate9");
+    if (!createD3D) {
+        hb_error("hb_dxva2_device_create9: failed to locate Direct3DCreate9");
+        return -1;
+    }
+
+    IDirect3D9 *d3d9 = createD3D(D3D_SDK_VERSION);
+    if (!d3d9) {
+        hb_error("hb_dxva2_device_create9: createD3D failed");
+        return -1;
+    }
+    *d3d9_out = d3d9;
+    return 0;
+}
+
+static int hb_dxva2_device_create9ex(HMODULE d3dlib, UINT adapter, IDirect3D9 **d3d9_out)
+{
+    IDirect3D9Ex *d3d9ex = NULL;
+    HRESULT hr;
+    pDirect3DCreate9Ex *createD3DEx = (pDirect3DCreate9Ex *)hb_dlsym(d3dlib, "Direct3DCreate9Ex");
+    if (!createD3DEx)
+    {
+        hb_error("hb_dxva2_device_create9ex: failed to locate Direct3DCreate9Ex");
+        return -1;
+    }
+
+    hr = createD3DEx(D3D_SDK_VERSION, &d3d9ex);
+    if (FAILED(hr))
+    {
+        hb_error("hb_dxva2_device_create9ex: createD3DEx failed %d", hr);
+        return -1;
+    }
+    *d3d9_out = (IDirect3D9 *)d3d9ex;
+    return 0;
+}
+
+static int hb_d3d11va_device_check()
+{
+    HANDLE d3dlib, dxgilib;
+
+    d3dlib  = hb_dlopen("d3d11.dll");
+    dxgilib = hb_dlopen("dxgi.dll");
+    if (!d3dlib || !dxgilib)
+    {
+        hb_error("hb_d3d11va_device_check: failed to load d3d11.dll and dxgi.dll");
+        return -1;
+    }
+
+    PFN_D3D11_CREATE_DEVICE mD3D11CreateDevice;
+    HB_PFN_CREATE_DXGI_FACTORY mCreateDXGIFactory;
+    mD3D11CreateDevice = (PFN_D3D11_CREATE_DEVICE)hb_dlsym(d3dlib, "D3D11CreateDevice");
+    mCreateDXGIFactory = (HB_PFN_CREATE_DXGI_FACTORY)hb_dlsym(dxgilib, "CreateDXGIFactory1");
+
+    if (!mD3D11CreateDevice || !mCreateDXGIFactory) {
+        hb_error("hb_d3d11va_device_check: failed to locate D3D11CreateDevice and CreateDXGIFactory1 functions");
+        return -1;
+    }
+
+    HRESULT hr;
+    IDXGIAdapter *pAdapter = NULL;
+    int adapter_id = 0;
+    IDXGIFactory2 *pDXGIFactory;
+    hr = mCreateDXGIFactory(&IID_IDXGIFactory2, (void **)&pDXGIFactory);
+    while (IDXGIFactory2_EnumAdapters(pDXGIFactory, adapter_id++, &pAdapter) != DXGI_ERROR_NOT_FOUND)
+    {
+        ID3D11Device* g_pd3dDevice = NULL;
+        DXGI_ADAPTER_DESC adapterDesc;
+
+        hr = mD3D11CreateDevice(pAdapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &g_pd3dDevice, NULL, NULL);
+        if (FAILED(hr)) {
+            hb_error("hb_d3d11va_device_check: D3D11CreateDevice returned %d", hr);
+            continue;
+        }
+
+        hr = IDXGIAdapter2_GetDesc(pAdapter, &adapterDesc);
+        if (FAILED(hr)) {
+            hb_error("hb_d3d11va_device_check: IDXGIAdapter2_GetDesc returned %d", hr);
+            continue;
+        }
+
+        if (pAdapter)
+            IDXGIAdapter_Release(pAdapter);
+
+        if (adapterDesc.VendorId == 0x8086) {
+            IDXGIFactory2_Release(pDXGIFactory);
+            hb_log("hb_d3d11va_device_check: QSV adapter with id %d has been found", adapter_id - 1);
+            return adapter_id - 1;
+        }
+    }
+    IDXGIFactory2_Release(pDXGIFactory);
+    return -1;
+}
+
+static int hb_dxva2_device_check()
+{
+    HRESULT hr;
+    HMODULE d3dlib = NULL;
+    IDirect3D9 *d3d9 = NULL;
+    D3DADAPTER_IDENTIFIER9 identifier;
+    D3DADAPTER_IDENTIFIER9 *d3dai = &identifier;
+    UINT adapter = D3DADAPTER_DEFAULT;
+
+    d3dlib = hb_dlopen("d3d9.dll");
+    if (!d3dlib)
+    {
+        hb_error("hb_dxva2_device_check: failed to load d3d9 library");
+        return -1;
+    }
+
+    if (hb_dxva2_device_create9ex(d3dlib, adapter, &d3d9) < 0)
+    {
+        // Retry with "classic" d3d9
+        hr = hb_dxva2_device_create9(d3dlib, adapter, &d3d9);
+        if (hr < 0)
+        {
+            hr = -1;
+            goto clean_up;
+        }
+    }
+
+    hr = IDirect3D9_GetAdapterIdentifier(d3d9, D3DADAPTER_DEFAULT, 0, d3dai);
+    if (FAILED(hr))
+    {
+        hb_error("hb_dxva2_device_check: IDirect3D9_GetAdapterIdentifier failed");
+        hr = -1;
+        goto clean_up;
+    }
+
+    unsigned intel_id = 0x8086;
+    if(d3dai)
+    {
+        if(d3dai->VendorId != intel_id)
+        {
+            hb_error("hb_dxva2_device_check: adapter that was found does not support QSV. It is required for zero-copy QSV path");
+            hr = -1;
+            goto clean_up;
+        }
+    }
+    hr = 0;
+
+clean_up:
+    if (d3d9)
+        IDirect3D9_Release(d3d9);
+
+    if (d3dlib)
+        hb_dlclose(d3dlib);
+
+    return hr;
+}
+
+static HRESULT lock_device(
+    IDirect3DDeviceManager9 *pDeviceManager,
+    BOOL fBlock,
+    IDirect3DDevice9 **ppDevice, // Receives a pointer to the device.
+    HANDLE *pHandle              // Receives a device handle.
+    )
+{
+    *pHandle = NULL;
+    *ppDevice = NULL;
+
+    HANDLE hDevice = 0;
+
+    HRESULT hr = pDeviceManager->lpVtbl->OpenDeviceHandle(pDeviceManager, &hDevice);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = pDeviceManager->lpVtbl->LockDevice(pDeviceManager, hDevice, ppDevice, fBlock);
+    }
+
+    if (hr == DXVA2_E_NEW_VIDEO_DEVICE)
+    {
+        // Invalid device handle. Try to open a new device handle.
+        hr = pDeviceManager->lpVtbl->CloseDeviceHandle(pDeviceManager, hDevice);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = pDeviceManager->lpVtbl->OpenDeviceHandle(pDeviceManager, &hDevice);
+        }
+
+        // Try to lock the device again.
+        if (SUCCEEDED(hr))
+        {
+            hr = pDeviceManager->lpVtbl->LockDevice(pDeviceManager, hDevice, ppDevice, TRUE);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        *pHandle = hDevice;
+    }
+    return hr;
+}
+
+static HRESULT unlock_device(
+    IDirect3DDeviceManager9 *pDeviceManager,
+    HANDLE handle              // Receives a device handle.
+    )
+{
+    HRESULT hr = pDeviceManager->lpVtbl->UnlockDevice(pDeviceManager, handle, 0);
+    if (SUCCEEDED(hr))
+    {
+        hr = pDeviceManager->lpVtbl->CloseDeviceHandle(pDeviceManager, handle);
+    }
+    return hr;
+}
+
+static int hb_qsv_find_surface_idx(const QSVMid *mids, const int nb_mids, const QSVMid *mid)
+{
+    if(mids)
+    {
+        const QSVMid *m = &mids[0];
+        int i;
+        for (i = 0; i < nb_mids; i++) {
+            m = &mids[i];
+            if ( (m->texture == mid->texture) && (m->handle == mid->handle) )
+                return i;
+        }
+    }
+    return -1;
+}
+
+int hb_qsv_replace_surface_mid(const QSVMid *mid, mfxFrameSurface1 *surface)
+{
+    int ret = hb_qsv_find_surface_idx(hb_enc_qsv_frames_ctx.mids, hb_enc_qsv_frames_ctx.nb_mids, mid);
+    if (ret < 0)
+    {
+        hb_error("encqsv: Surface with MemId=%p has not been found in the pool\n", mid);
+        return -1;
+    }
+    else
+    {
+        surface->Data.MemId = &hb_enc_qsv_frames_ctx.mids[ret];
+    }
+    return 0;
+}
+
+int hb_qsv_release_surface_from_pool(const QSVMid *mid)
+{
+    int ret = hb_qsv_find_surface_idx(hb_enc_qsv_frames_ctx.mids, hb_enc_qsv_frames_ctx.nb_mids, mid);
+    if (ret < 0)
+    {
+        hb_error("encqsv: Surface with MemId=%p has not been found in the pool\n", mid);
+        return -1;
+    }
+    else
+    {
+        ff_qsv_atomic_dec(&hb_enc_qsv_frames_ctx.pool[ret]);
+    }
+    return 0;
+}
+
+void hb_qsv_get_free_surface_from_pool(const int start_index, const int end_index, QSVMid **out_mid, mfxFrameSurface1 **out_surface)
+{
+    QSVMid *mid = NULL;
+    mfxFrameSurface1 *output_surface = NULL;
+
+    AVHWFramesContext *frames_ctx = (AVHWFramesContext*)hb_enc_qsv_frames_ctx.hw_frames_ctx->data;
+    AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
+
+    // find the first available surface in the pool
+    int count = 0;
+    while(1)
+    {
+        if(count > 30)
+        {
+            hb_qsv_sleep(10); // prevent hang when all surfaces all used
+            count = 0;
+        }
+
+        for(int i = start_index; i < end_index; i++)
+        {
+            if(hb_enc_qsv_frames_ctx.pool[i] == 0)
+            {
+                mid = &hb_enc_qsv_frames_ctx.mids[i];
+                output_surface = &frames_hwctx->surfaces[i];
+                if(output_surface->Data.Locked == 0)
+                {
+                    *out_mid = mid;
+                    *out_surface = output_surface;
+                    ff_qsv_atomic_inc(&hb_enc_qsv_frames_ctx.pool[i]);
+                    return;
+                }
+            }
+        }
+
+        count++;
+    }
+}
+
+static int hb_qsv_allocate_dx11_encoder_pool(ID3D11Device *device, ID3D11Texture2D* input_texture)
+{
+    D3D11_TEXTURE2D_DESC desc = { 0 };
+    ID3D11Texture2D_GetDesc(input_texture, &desc);
+    desc.ArraySize = 1;
+    desc.BindFlags = D3D10_BIND_RENDER_TARGET;
+
+    for (size_t i = 0; i < hb_enc_qsv_frames_ctx.nb_mids; i++)
+    {
+        ID3D11Texture2D* texture;
+        HRESULT hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &texture);
+        if (hr != S_OK)
+        {
+            hb_error("hb_qsv_allocate_dx11_encoder_pool: ID3D11Device_CreateTexture2D error");
+            return -1;
+        }
+
+        QSVMid *mid = &hb_enc_qsv_frames_ctx.mids[i];
+        mid->handle = 0;
+        mid->texture = texture;
+    }
+    return 0;
+}
+
+static int hb_qsv_deallocate_dx11_encoder_pool()
+{
+    if (device_manager_handle_type == MFX_HANDLE_D3D11_DEVICE)
+    {
+        for (size_t i = 0; i < hb_enc_qsv_frames_ctx.nb_mids; i++)
+        {
+            QSVMid *mid = &hb_enc_qsv_frames_ctx.mids[i];
+            ID3D11Texture2D* texture = mid->texture;
+            if (texture)
+            {
+                HRESULT hr = ID3D11Texture2D_Release(texture);
+                mid->texture = NULL;
+                if (hr != S_OK)
+                {
+                    hb_error("hb_qsv_deallocate_dx11_encoder_pool: ID3D11Device_ReleaseTexture2D error");
+                    return -1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static int hb_qsv_get_dx_device()
+{
+    AVHWDeviceContext    *device_ctx = (AVHWDeviceContext*)hb_hw_device_ctx->data;
+    AVQSVDeviceContext *device_hwctx = device_ctx->hwctx;
+    mfxSession        parent_session = device_hwctx->session;
+
+    if (device_manager_handle == NULL)
+    {
+        mfxIMPL device_impl;
+        int err = MFXQueryIMPL(parent_session, &device_impl);
+        if (err != MFX_ERR_NONE)
+        {
+            hb_error("hb_qsv_get_dx_device: no impl could be retrieved");
+            return -1;
+        }
+
+        if (MFX_IMPL_VIA_D3D11 == MFX_IMPL_VIA_MASK(device_impl))
+        {
+            device_manager_handle_type = MFX_HANDLE_D3D11_DEVICE;
+        }
+        else if (MFX_IMPL_VIA_D3D9 == MFX_IMPL_VIA_MASK(device_impl))
+        {
+            device_manager_handle_type = MFX_HANDLE_D3D9_DEVICE_MANAGER;
+        }
+        else
+        {
+            hb_error("hb_qsv_get_dx_device: unsupported impl");
+            return -1;
+        }
+
+        err = MFXVideoCORE_GetHandle(parent_session, device_manager_handle_type, &device_manager_handle);
+        if (err != MFX_ERR_NONE)
+        {
+            hb_error("hb_qsv_get_dx_device: no supported hw handle could be retrieved "
+                "from the session\n");
+            return -1;
+        }
+        if (device_manager_handle_type == MFX_HANDLE_D3D11_DEVICE)
+        {
+            ID3D11Device *device = (ID3D11Device *)device_manager_handle;
+            ID3D11Texture2D* input_texture = hb_enc_qsv_frames_ctx.input_texture;
+            err = hb_qsv_allocate_dx11_encoder_pool(device, input_texture);
+            if (err < 0)
+            {
+                hb_error("hb_qsv_get_dx_device: hb_qsv_allocate_dx11_encoder_pool failed");
+                return -1;
+            }
+            if (device_context == NULL)
+            {
+                ID3D11Device_GetImmediateContext(device, &device_context);
+                if (!device_context)
+                    return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+hb_buffer_t* hb_qsv_copy_frame(AVFrame *frame, hb_qsv_context *qsv_ctx)
+{
+    hb_buffer_t *out;
+    out = hb_frame_buffer_init(frame->format, frame->width, frame->height);
+    hb_avframe_set_video_buffer_flags(out, frame, (AVRational){1,1});
+
+    // alloc new frame
+    out->qsv_details.frame = av_frame_alloc();
+    if (!out->qsv_details.frame) {
+        return out;
+    }
+
+    // copy content of input frame
+    av_frame_copy(out->qsv_details.frame, frame);
+    // but no copy the sufrace pointer, it will be added later from the pool
+    out->qsv_details.frame->data[3] = 0;
+
+    QSVMid *mid = NULL;
+    mfxFrameSurface1* output_surface = NULL;
+    hb_qsv_get_free_surface_from_pool(0, HB_POOL_SURFACE_SIZE - HB_POOL_ENCODER_SIZE, &mid, &output_surface);
+
+    if (device_manager_handle_type == MFX_HANDLE_D3D9_DEVICE_MANAGER)
+    {
+        mfxFrameSurface1* input_surface = (mfxFrameSurface1*)frame->data[3];
+
+        // copy all surface fields
+        *output_surface = *input_surface;
+        // replace the mem id to mem id from the pool
+        output_surface->Data.MemId = mid;
+        // copy input sufrace to sufrace from the pool
+        IDirect3DDevice9 *pDevice = NULL;
+        HANDLE handle;
+
+        HRESULT result = lock_device((IDirect3DDeviceManager9 *)device_manager_handle, 0, &pDevice, &handle);
+        if (FAILED(result))
+        {
+            hb_error("hb_qsv_copy_frame: lock_device failded %d", result);
+            return out;
+        }
+        result = IDirect3DDevice9_StretchRect(pDevice, input_surface->Data.MemId, 0, mid->handle, 0, D3DTEXF_LINEAR);
+        if (FAILED(result))
+        {
+            hb_error("hb_qsv_copy_frame: IDirect3DDevice9_StretchRect failded %d", result);
+            return out;
+        }
+        result = unlock_device((IDirect3DDeviceManager9 *)device_manager_handle, handle);
+        if (FAILED(result))
+        {
+            hb_error("hb_qsv_copy_frame: unlock_device failded %d", result);
+            return out;
+        }
+    }
+    else if (device_manager_handle_type == MFX_HANDLE_D3D11_DEVICE)
+    {
+        mfxFrameSurface1* input_surface = (mfxFrameSurface1*)frame->data[3];
+
+        // copy all surface fields
+        *output_surface = *input_surface;
+        // replace the mem id to mem id from the pool
+        output_surface->Data.MemId = mid;
+        // copy input sufrace to sufrace from the pool
+        ID3D11DeviceContext_CopySubresourceRegion(device_context, mid->texture, (uint64_t)mid->handle, 0, 0, 0, hb_enc_qsv_frames_ctx.input_texture, (uint64_t)input_surface->Data.MemId, NULL);
+        ID3D11DeviceContext_Flush(device_context);
+    }
+    else
+    {
+        hb_error("hb_qsv_copy_frame: incorrect mfx impl");
+        return out;
+    }
+    out->qsv_details.frame->data[3] = (uint8_t*)output_surface;
+    out->qsv_details.qsv_atom = 0;
+    out->qsv_details.ctx      = qsv_ctx;
+    return out;
+}
+
+static int qsv_get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
+{
+    int ret = -1;
+    if(s->hw_frames_ctx)
+    {
+        ret = av_hwframe_get_buffer(s->hw_frames_ctx, frame, 0);
+    }
+    return ret;
+}
+
+void hb_qsv_uninit_dec(AVCodecContext *s)
+{
+    if(s && s->hw_frames_ctx)
+        av_buffer_unref(&s->hw_frames_ctx);
+}
+
+void hb_qsv_uninit_enc()
+{
+    if(enc_hw_frames_ctx)
+        av_buffer_unref(&enc_hw_frames_ctx);
+
+    enc_hw_frames_ctx = NULL;
+    hb_hw_device_ctx = NULL;
+    qsv_device = NULL;
+    device_manager_handle = NULL;
+    hb_qsv_deallocate_dx11_encoder_pool();
+    if (device_context)
+    {
+        ID3D11DeviceContext_Release(device_context);
+        device_context = NULL;
+    }
+}
+
+static int qsv_device_init(AVCodecContext *s)
+{
+    int err;
+    AVDictionary *dict = NULL;
+
+    if (qsv_device) {
+        err = av_dict_set(&dict, "child_device", qsv_device, 0);
+        if (err < 0)
+            return err;
+    }
+
+    err = av_dict_set(&dict, "child_device_type", "d3d11va", 0);
+    err = av_dict_set(&dict, "vendor", "0x8086", 0);
+
+    err = av_hwdevice_ctx_create(&hb_hw_device_ctx, AV_HWDEVICE_TYPE_QSV,
+                                 0, dict, 0);
+    if (err < 0) {
+        hb_error("qsv_device_init: error creating a QSV device %d", err);
+        goto err_out;
+    }
+
+err_out:
+    if (dict)
+        av_dict_free(&dict);
+
+    return err;
+}
+
+static int qsv_init(AVCodecContext *s)
+{
+    AVHWFramesContext *frames_ctx;
+    AVQSVFramesContext *frames_hwctx;
+
+    int ret;
+
+    if (!hb_hw_device_ctx) {
+        ret = qsv_device_init(s);
+        if (ret < 0)
+            return ret;
+    }
+
+    av_buffer_unref(&s->hw_frames_ctx);
+    s->hw_frames_ctx = av_hwframe_ctx_alloc(hb_hw_device_ctx);
+    if (!s->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+
+    frames_ctx   = (AVHWFramesContext*)s->hw_frames_ctx->data;
+    frames_hwctx = frames_ctx->hwctx;
+
+    frames_ctx->width             = FFALIGN(s->coded_width,  32);
+    frames_ctx->height            = FFALIGN(s->coded_height, 32);
+    frames_ctx->format            = AV_PIX_FMT_QSV;
+    frames_ctx->sw_format         = s->sw_pix_fmt;
+    frames_ctx->initial_pool_size = 32 + s->extra_hw_frames;
+    frames_hwctx->frame_type      = MFX_MEMTYPE_VIDEO_MEMORY_DECODER_TARGET;
+
+    ret = av_hwframe_ctx_init(s->hw_frames_ctx);
+    if (ret < 0) {
+        hb_error("qsv_init: av_hwframe_ctx_init failed %d", ret);
+        return ret;
+    }
+
+    hb_enc_qsv_frames_ctx.input_texture = frames_hwctx->texture;
+
+    av_buffer_unref(&enc_hw_frames_ctx);
+    enc_hw_frames_ctx = av_hwframe_ctx_alloc(hb_hw_device_ctx);
+    if (!enc_hw_frames_ctx)
+        return AVERROR(ENOMEM);
+
+    hb_enc_qsv_frames_ctx.hw_frames_ctx = enc_hw_frames_ctx;
+    frames_ctx   = (AVHWFramesContext*)enc_hw_frames_ctx->data;
+    frames_hwctx = frames_ctx->hwctx;
+
+    frames_ctx->width             = FFALIGN(s->coded_width,  32);
+    frames_ctx->height            = FFALIGN(s->coded_height, 32);
+    frames_ctx->format            = AV_PIX_FMT_QSV;
+    frames_ctx->sw_format         = s->sw_pix_fmt;
+    frames_ctx->initial_pool_size = HB_POOL_SURFACE_SIZE;
+    frames_hwctx->frame_type      = MFX_MEMTYPE_VIDEO_MEMORY_DECODER_TARGET;
+
+    ret = av_hwframe_ctx_init(enc_hw_frames_ctx);
+    if (ret < 0) {
+        hb_error("qsv_init: av_hwframe_ctx_init failed %d", ret);
+        return ret;
+    }
+    /* allocate the memory ids for the external frames */
+    av_buffer_unref(&hb_enc_qsv_frames_ctx.mids_buf);
+    hb_enc_qsv_frames_ctx.mids_buf = hb_qsv_create_mids(hb_enc_qsv_frames_ctx.hw_frames_ctx);
+    if (!hb_enc_qsv_frames_ctx.mids_buf)
+        return AVERROR(ENOMEM);
+    hb_enc_qsv_frames_ctx.mids    = (QSVMid*)hb_enc_qsv_frames_ctx.mids_buf->data;
+    hb_enc_qsv_frames_ctx.nb_mids = frames_hwctx->nb_surfaces;
+    memset(hb_enc_qsv_frames_ctx.pool, 0, hb_enc_qsv_frames_ctx.nb_mids * sizeof(hb_enc_qsv_frames_ctx.pool[0]));
+    ret = hb_qsv_get_dx_device();
+    if (ret < 0) {
+        hb_error("qsv_init: hb_qsv_get_dx_device failed %d", ret);
+        return ret;
+    }
+    return 0;
+}
+
+int hb_qsv_get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
+{
+    if (frame->format == AV_PIX_FMT_QSV)
+        return qsv_get_buffer(s, frame, flags);
+
+    return avcodec_default_get_buffer2(s, frame, flags);
+}
+
+enum AVPixelFormat hb_qsv_get_format(AVCodecContext *s, const enum AVPixelFormat *pix_fmts)
+{
+    while (*pix_fmts != AV_PIX_FMT_NONE) {
+        if (*pix_fmts == AV_PIX_FMT_QSV) {
+            int ret = qsv_init(s);
+            if (ret < 0) {
+                hb_error("hb_qsv_get_format: QSV hwaccel initialization failed");
+                return AV_PIX_FMT_NONE;
+            }
+
+            if (s->hw_frames_ctx) {
+                s->hw_frames_ctx = av_buffer_ref(s->hw_frames_ctx);
+                if (!s->hw_frames_ctx)
+                    return AV_PIX_FMT_NONE;
+            }
+            return AV_PIX_FMT_QSV;
+        }
+
+        pix_fmts++;
+    }
+
+    hb_error("hb_qsv_get_format: the QSV pixel format not offered in get_format()");
+    return AV_PIX_FMT_NONE;
+}
+
+int hb_qsv_preset_is_zero_copy_enabled(const hb_dict_t *job_dict)
+{
+    hb_dict_t *video_dict, *qsv, *encoder;
+    int qsv_encoder_enabled = 0;
+    int qsv_decoder_enabled = 0;
+    video_dict = hb_dict_get(job_dict, "Video");
+    if(video_dict)
+    {
+        encoder = hb_dict_get(video_dict, "Encoder");
+        if(encoder)
+        {
+            if (hb_value_type(encoder) == HB_VALUE_TYPE_STRING)
+            {
+                if(!strcasecmp(hb_value_get_string(encoder), "qsv_h264") ||
+                    !strcasecmp(hb_value_get_string(encoder), "qsv_h265"))
+                {
+                    qsv_encoder_enabled = 1;
+                }
+            }
+        }
+        qsv = hb_dict_get(video_dict, "QSV");
+        if (qsv != NULL)
+        {
+            hb_dict_t *decode;
+            decode = hb_dict_get(qsv, "Decode");
+            if(decode)
+            {
+                if (hb_value_type(decode) == HB_VALUE_TYPE_BOOL)
+                {
+                    qsv_decoder_enabled = hb_value_get_bool(decode);
+                }
+            }
+        }
+    }
+    return (qsv_encoder_enabled && qsv_decoder_enabled);
+}
+
+#else // other OS
+
+hb_buffer_t* hb_qsv_copy_frame(AVFrame *frame, hb_qsv_context *qsv_ctx)
+{
+    return NULL;
+}
+
+void hb_qsv_get_free_surface_from_pool(const int start_index, const int end_index, QSVMid **out_mid, mfxFrameSurface1 **out_surface)
+{
+    return;
+}
+
+int hb_qsv_replace_surface_mid(const QSVMid *mid, mfxFrameSurface1 *surface)
+{
+    return -1;
+}
+
+int hb_qsv_release_surface_from_pool(const QSVMid *mid)
+{
+    return -1;
+}
+
+enum AVPixelFormat hb_qsv_get_format(AVCodecContext *s, const enum AVPixelFormat *pix_fmts)
+{
+    return AV_PIX_FMT_NONE;
+}
+
+int hb_qsv_get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
+{
+    return -1;
+}
+
+void hb_qsv_uninit_dec(AVCodecContext *s)
+{
+}
+
+void hb_qsv_uninit_enc()
+{
+}
+
+int hb_qsv_preset_is_zero_copy_enabled(const hb_dict_t *job_dict)
+{
+    return 0;
+}
+
+static int hb_dxva2_device_check()
+{
+    return -1;
+}
+
+static int hb_d3d11va_device_check()
+{
+    return -1;
+}
+#endif
+
 #else
 
 int hb_qsv_available()
@@ -2224,4 +3064,4 @@ int hb_qsv_available()
     return 0;
 }
 
-#endif // USE_QSV
+#endif // HB_PROJECT_FEATURE_QSV

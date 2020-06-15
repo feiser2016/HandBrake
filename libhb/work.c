@@ -1,19 +1,20 @@
 /* work.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 #include "libavformat/avformat.h"
-#include "decomb.h"
+#include "handbrake/decomb.h"
+#include "handbrake/hbavfilter.h"
 
-#ifdef USE_QSV
-#include "qsv_common.h"
-#include "qsv_filter_pp.h"
+#if HB_PROJECT_FEATURE_QSV
+#include "handbrake/qsv_common.h"
+#include "handbrake/qsv_filter_pp.h"
 #endif
 
 typedef struct
@@ -56,44 +57,40 @@ hb_thread_t * hb_work_init( hb_list_t * jobs, volatile int * die, hb_error_code 
     return hb_thread_init( "work", work_func, work, HB_LOW_PRIORITY );
 }
 
-static void InitWorkState(hb_handle_t *h, int pass_id, int pass, int pass_count)
+static void InitWorkState(hb_job_t * job, int pass, int pass_count)
 {
     hb_state_t state;
 
-    state.state  = HB_STATE_WORKING;
+    memset(&state, 0, sizeof(state));
+    state.state       = HB_STATE_WORKING;
+    state.sequence_id = job->sequence_id;
 #define p state.param.working
-    p.pass_id    = pass_id;
-    p.pass       = pass;
-    p.pass_count = pass_count;
-    p.progress   = 0.0;
-    p.rate_cur   = 0.0;
-    p.rate_avg   = 0.0;
-    p.hours      = -1;
-    p.minutes    = -1;
-    p.seconds    = -1;
+    p.pass_id         = job->pass_id;
+    p.pass            = pass;
+    p.pass_count      = pass_count;
+    p.progress        = 0.0;
+    p.rate_cur        = 0.0;
+    p.rate_avg        = 0.0;
+    p.eta_seconds     = 0;
+    p.hours           = -1;
+    p.minutes         = -1;
+    p.seconds         = -1;
 #undef p
 
-    hb_set_state( h, &state );
-
+    hb_set_state( job->h, &state );
 }
 
-static void SetWorkdoneState(hb_job_t *job)
+static void SetWorkStateInfo(hb_job_t *job)
 {
     hb_state_t state;
-
 
     if (job == NULL)
     {
         return;
     }
     hb_get_state2(job->h, &state);
-
-    state.state                     = HB_STATE_WORKDONE;
-    state.param.working.error       = *job->done_error;
-    state.param.working.sequence_id = job->sequence_id;
-
+    state.param.working.error        = *job->done_error;
     hb_set_state( job->h, &state );
-
 }
 
 /**
@@ -105,6 +102,8 @@ static void work_func( void * _work )
     hb_work_t  * work = _work;
     hb_job_t   * job;
 
+    time_t t = time(NULL);
+    hb_log("Starting work at: %s", asctime(localtime(&t)));
     hb_log( "%d job(s) to process", hb_list_count( work->jobs ) );
 
     while( !*work->die && ( job = hb_list_item( work->jobs, 0 ) ) )
@@ -122,6 +121,8 @@ static void work_func( void * _work )
         {
             hb_deep_log(1, "json job:\n%s", job->json);
 
+            // Initialize state sequence_id
+            InitWorkState(job, 0, 0);
             // Perform title scan for json job
             hb_json_job_scan(job->h, job->json);
 
@@ -151,11 +152,11 @@ static void work_func( void * _work )
             job->die = work->die;
             job->done_error = work->error;
             *(work->current_job) = job;
-            InitWorkState(job->h, job->pass_id, pass + 1, pass_count);
+            InitWorkState(job, pass + 1, pass_count);
             do_job( job );
-            *(work->current_job) = NULL;
         }
-        SetWorkdoneState(job);
+        SetWorkStateInfo(job);
+        *(work->current_job) = NULL;
 
         // Clean job passes
         for (pass = 0; pass < pass_count; pass++)
@@ -170,6 +171,8 @@ static void work_func( void * _work )
         hb_force_rescan(h);
     }
 
+    t = time(NULL);
+    hb_log("Finished work at: %s", asctime(localtime(&t)));
     free( work );
 }
 
@@ -256,7 +259,7 @@ hb_work_object_t* hb_video_encoder(hb_handle_t *h, int vcodec)
         case HB_VCODEC_THEORA:
             w = hb_get_work(h, WORK_ENCTHEORA);
             break;
-#ifdef USE_X265
+#if HB_PROJECT_FEATURE_X265
         case HB_VCODEC_X265_8BIT:
         case HB_VCODEC_X265_10BIT:
         case HB_VCODEC_X265_12BIT:
@@ -264,7 +267,7 @@ hb_work_object_t* hb_video_encoder(hb_handle_t *h, int vcodec)
             w = hb_get_work(h, WORK_ENCX265);
             break;
 #endif
-#ifdef USE_VCE
+#if HB_PROJECT_FEATURE_VCE
         case HB_VCODEC_FFMPEG_VCE_H264:
             w = hb_get_work(h, WORK_ENCAVCODEC);
             w->codec_param = AV_CODEC_ID_H264;
@@ -274,12 +277,22 @@ hb_work_object_t* hb_video_encoder(hb_handle_t *h, int vcodec)
             w->codec_param = AV_CODEC_ID_HEVC;
             break;
 #endif
-#ifdef USE_NVENC
+#if HB_PROJECT_FEATURE_NVENC
         case HB_VCODEC_FFMPEG_NVENC_H264:
             w = hb_get_work(h, WORK_ENCAVCODEC);
             w->codec_param = AV_CODEC_ID_H264;
             break;
         case HB_VCODEC_FFMPEG_NVENC_H265:
+            w = hb_get_work(h, WORK_ENCAVCODEC);
+            w->codec_param = AV_CODEC_ID_HEVC;
+            break;
+#endif
+#ifdef __APPLE__
+        case HB_VCODEC_FFMPEG_VT_H264:
+            w = hb_get_work(h, WORK_ENCAVCODEC);
+            w->codec_param = AV_CODEC_ID_H264;
+            break;
+        case HB_VCODEC_FFMPEG_VT_H265:
             w = hb_get_work(h, WORK_ENCAVCODEC);
             w->codec_param = AV_CODEC_ID_HEVC;
             break;
@@ -411,7 +424,7 @@ void hb_display_job_info(hb_job_t *job)
 
     hb_log(" * video track");
 
-#ifdef USE_QSV
+#if HB_PROJECT_FEATURE_QSV
     if (hb_qsv_decode_is_enabled(job))
     {
         hb_log("   + decoder: %s",
@@ -435,6 +448,10 @@ void hb_display_job_info(hb_job_t *job)
         for( i = 0; i < hb_list_count( job->list_filter ); i++ )
         {
             hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+            if (filter->aliased && global_verbosity_level < 2)
+            {
+                continue;
+            }
             char * settings = hb_filter_settings_string(filter->id,
                                                         filter->settings);
             if (settings != NULL)
@@ -520,6 +537,8 @@ void hb_display_job_info(hb_job_t *job)
                 case HB_VCODEC_FFMPEG_VCE_H265:
                 case HB_VCODEC_FFMPEG_NVENC_H264:
                 case HB_VCODEC_FFMPEG_NVENC_H265:
+                case HB_VCODEC_FFMPEG_VT_H264:
+                case HB_VCODEC_FFMPEG_VT_H265:
                     hb_log("     + profile: %s", job->encoder_profile);
                 default:
                     break;
@@ -531,6 +550,9 @@ void hb_display_job_info(hb_job_t *job)
             {
                 case HB_VCODEC_X264_8BIT:
                 case HB_VCODEC_X264_10BIT:
+                case HB_VCODEC_X265_8BIT:
+                case HB_VCODEC_X265_10BIT:
+                case HB_VCODEC_X265_12BIT:
                 case HB_VCODEC_QSV_H264:
                 case HB_VCODEC_QSV_H265:
                 case HB_VCODEC_QSV_H265_10BIT:
@@ -538,6 +560,9 @@ void hb_display_job_info(hb_job_t *job)
                 case HB_VCODEC_FFMPEG_VCE_H265:
                 case HB_VCODEC_FFMPEG_NVENC_H264:
                 case HB_VCODEC_FFMPEG_NVENC_H265:
+                case HB_VCODEC_FFMPEG_VT_H264:
+                // VT h.265 currently only supports auto level
+                // case HB_VCODEC_FFMPEG_VT_H265:
                     hb_log("     + level:   %s", job->encoder_level);
                 default:
                     break;
@@ -590,7 +615,7 @@ void hb_display_job_info(hb_job_t *job)
                         subtitle->lang, subtitle->track, subtitle->id,
                         subtitle->format == PICTURESUB ? "Picture" : "Text");
             }
-            else if( subtitle->source == SRTSUB )
+            else if (subtitle->source == IMPORTSRT)
             {
                 /* For SRT, print offset and charset too */
                 hb_log(" * subtitle track %d, %s (track %d, id 0x%x, Text) -> "
@@ -601,6 +626,18 @@ void hb_display_job_info(hb_job_t *job)
                                                           : "Passthrough",
                        subtitle->config.default_track ? ", Default" : "",
                        subtitle->config.offset, subtitle->config.src_codeset);
+            }
+            else if (subtitle->source == IMPORTSSA)
+            {
+                /* For SSA, print offset */
+                hb_log(" * subtitle track %d, %s (track %d, id 0x%x, Text) -> "
+                       "%s%s, offset: %"PRId64,
+                       subtitle->out_track, subtitle->lang, subtitle->track,
+                       subtitle->id,
+                       subtitle->config.dest == RENDERSUB ? "Render/Burn-in"
+                                                          : "Passthrough",
+                       subtitle->config.default_track ? ", Default" : "",
+                       subtitle->config.offset);
             }
             else
             {
@@ -613,6 +650,10 @@ void hb_display_job_info(hb_job_t *job)
                                                           : "Passthrough",
                        subtitle->config.force ? ", Forced Only" : "",
                        subtitle->config.default_track ? ", Default" : "" );
+            }
+            if (subtitle->config.name )
+            {
+                hb_log("   + name: %s", subtitle->config.name);
             }
         }
     }
@@ -1185,7 +1226,7 @@ static int sanitize_audio(hb_job_t *job)
 
 static int sanitize_qsv( hb_job_t * job )
 {
-#ifdef USE_QSV
+#if HB_PROJECT_FEATURE_QSV
 #if 0 // TODO: re-implement QSV VPP filtering and QSV zerocopy path
     int i;
 
@@ -1349,12 +1390,12 @@ static int sanitize_qsv( hb_job_t * job )
         }
     }
 #endif // QSV VPP filtering and QSV zerocopy path
-#endif // USE_QSV
+#endif // HB_PROJECT_FEATURE_QSV
 
     return 0;
 }
 
-static void sanitize_filter_list(hb_list_t *list)
+static void sanitize_filter_list(hb_list_t *list, hb_geometry_t src_geo)
 {
     // Add selective deinterlacing mode if comb detection is enabled
     if (hb_filter_find(list, HB_FILTER_COMB_DETECT) != NULL)
@@ -1375,8 +1416,49 @@ static void sanitize_filter_list(hb_list_t *list)
         }
     }
 
-    // Combine HB_FILTER_AVFILTERs that are sequential
-    hb_avfilter_combine(list);
+    int is_detel = 0;
+    hb_filter_object_t * filter = hb_filter_find(list, HB_FILTER_DETELECINE);
+    if (filter != NULL)
+    {
+        is_detel = 1;
+    }
+
+    filter = hb_filter_find(list, HB_FILTER_VFR);
+    if (filter != NULL)
+    {
+        int mode = hb_dict_get_int(filter->settings, "mode");
+        // "Same as source" FPS and no HB_FILTER_DETELECINE
+        if ( (mode == 0) && (is_detel == 0) )
+        {
+            hb_list_rem(list, filter);
+            hb_filter_close(&filter);
+            hb_log("Skipping vfr filter");
+        }
+    }
+
+    filter = hb_filter_find(list, HB_FILTER_CROP_SCALE);
+    if (filter != NULL)
+    {
+        hb_dict_t* settings = filter->settings;
+        if (settings != NULL)
+        {
+            int width, height, top, bottom, left, right;
+            width = hb_dict_get_int(settings, "width");
+            height = hb_dict_get_int(settings, "height");
+            top = hb_dict_get_int(settings, "crop-top");
+            bottom = hb_dict_get_int(settings, "crop-bottom");
+            left = hb_dict_get_int(settings, "crop-left");
+            right = hb_dict_get_int(settings, "crop-right");
+
+            if ( (src_geo.width == width) && (src_geo.height == height) &&
+                (top == 0) && (bottom == 0 ) && (left == 0) && (right == 0) )
+            {
+                hb_list_rem(list, filter);
+                hb_filter_close(&filter);
+                hb_log("Skipping crop/scale filter");
+            }
+        }
+    }
 }
 
 /**
@@ -1414,7 +1496,18 @@ static void do_job(hb_job_t *job)
     w = hb_get_work(job->h, WORK_READER);
     hb_list_add(job->list_work, w);
 
-    hb_log( "starting job" );
+    if (job->indepth_scan)
+    {
+        hb_log( "Starting Task: Subtitle Scan" );
+    }
+    else if (job->pass_id == HB_PASS_ENCODE_1ST)
+    {
+        hb_log( "Starting Task: Analysis Pass" );
+    }
+    else
+    {
+        hb_log( "Starting Task: Encoding Pass" );
+    }
 
     // This must be performed before initializing filters because
     // it can add the subtitle render filter.
@@ -1435,31 +1528,42 @@ static void do_job(hb_job_t *job)
         *job->die = 1;
         goto cleanup;
     }
-
     // Filters have an effect on settings.
     // So initialize the filters and update the job.
     if (job->list_filter && hb_list_count(job->list_filter))
     {
         hb_filter_init_t init;
 
-        sanitize_filter_list(job->list_filter);
+        sanitize_filter_list(job->list_filter, title->geometry);
 
         memset(&init, 0, sizeof(init));
+        init.time_base.num = 1;
+        init.time_base.den = 90000;
         init.job = job;
+        // TODO: When more complete pix format support is complete this
+        // needs to be updated to reflect the pix_fmt output by
+        // decavcodec.c.  This may be different than title->pix_fmt
+        // since we will likely only support planar YUV color formats.
         init.pix_fmt = AV_PIX_FMT_YUV420P;
+        init.color_range = AVCOL_RANGE_MPEG;
+
+        init.color_prim = title->color_prim;
+        init.color_transfer = title->color_transfer;
+        init.color_matrix = title->color_matrix;
         init.geometry.width = title->geometry.width;
         init.geometry.height = title->geometry.height;
 
         init.geometry.par = job->par;
-        memcpy(init.crop, title->crop, sizeof(int[4]));
+        memset(init.crop, 0, sizeof(int[4]));
         init.vrate = job->vrate;
         init.cfr = 0;
         init.grayscale = 0;
+
         for( i = 0; i < hb_list_count( job->list_filter ); )
         {
             hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
             filter->done = &job->done;
-            if (filter->init(filter, &init))
+            if (filter->init != NULL && filter->init(filter, &init))
             {
                 hb_log( "Failure to initialise filter '%s', disabling",
                         filter->name );
@@ -1477,12 +1581,16 @@ static void do_job(hb_job_t *job)
         job->cfr = init.cfr;
         job->grayscale = init.grayscale;
 
+        // Combine HB_FILTER_AVFILTERs that are sequential
+        hb_avfilter_combine(job->list_filter);
+
         // Perform filter post_init which informs filters of final
         // job configuration. e.g. rendersub filter needs to know the
         // final crop dimensions.
         for( i = 0; i < hb_list_count( job->list_filter ); )
         {
             hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+            filter->done = &job->done;
             if (filter->post_init != NULL && filter->post_init(filter, job))
             {
                 hb_log( "Failure to initialise filter '%s', disabling",
@@ -1519,7 +1627,7 @@ static void do_job(hb_job_t *job)
     hb_reduce(&job->vrate.num, &job->vrate.den,
                job->vrate.num,  job->vrate.den);
 
-#ifdef USE_QSV
+#if HB_PROJECT_FEATURE_QSV
 #if 0 // TODO: re-implement QSV zerocopy path
     if (hb_qsv_decode_is_enabled(job) && (job->vcodec & HB_VCODEC_QSV_MASK))
     {
@@ -1609,10 +1717,10 @@ static void do_job(hb_job_t *job)
         // Since that number is unbounded, the FIFO must be made
         // (effectively) unbounded in capacity.
         subtitle->fifo_raw  = hb_fifo_init( FIFO_UNBOUNDED, FIFO_UNBOUNDED_WAKE );
-        if (w->id != WORK_DECSRTSUB)
+        // Check if input comes from a file.
+        if (subtitle->source != IMPORTSRT &&
+            subtitle->source != IMPORTSSA)
         {
-            // decsrtsub is a buffer source like reader.  It's input comes
-            // from a file.
             subtitle->fifo_in  = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
         }
         if (!job->indepth_scan)
@@ -1682,9 +1790,12 @@ static void do_job(hb_job_t *job)
             for (i = 0; i < hb_list_count(job->list_filter); i++)
             {
                 hb_filter_object_t * filter = hb_list_item(job->list_filter, i);
-                filter->fifo_in = fifo_in;
-                filter->fifo_out = hb_fifo_init( FIFO_MINI, FIFO_MINI_WAKE );
-                fifo_in = filter->fifo_out;
+                if (!filter->skip)
+                {
+                    filter->fifo_in = fifo_in;
+                    filter->fifo_out = hb_fifo_init(FIFO_MINI, FIFO_MINI_WAKE);
+                    fifo_in = filter->fifo_out;
+                }
             }
             job->fifo_render = fifo_in;
         }
@@ -1762,10 +1873,13 @@ static void do_job(hb_job_t *job)
         {
             hb_filter_object_t * filter = hb_list_item(job->list_filter, i);
 
-            // Filters were initialized earlier, so we just need
-            // to start the filter's thread
-            filter->thread = hb_thread_init( filter->name, filter_loop, filter,
-                                             HB_LOW_PRIORITY );
+            if (!filter->skip)
+            {
+                // Filters were initialized earlier, so we just need
+                // to start the filter's thread
+                filter->thread = hb_thread_init(filter->name, filter_loop,
+                                                filter, HB_LOW_PRIORITY);
+            }
         }
     }
 
@@ -1855,7 +1969,10 @@ cleanup:
         for (i = 0; i < hb_list_count( job->list_filter ); i++)
         {
             hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
-            hb_fifo_close( &filter->fifo_out );
+            if (!filter->skip)
+            {
+                hb_fifo_close( &filter->fifo_out );
+            }
         }
     }
 
@@ -1885,7 +2002,7 @@ static inline void copy_chapter( hb_buffer_t * dst, hb_buffer_t * src )
  * Performs the work object's specific work function.
  * Loops calling work function for associated work object. Sleeps when fifo is full.
  * Monitors work done indicator.
- * Exits loop when work indiactor is set.
+ * Exits loop when work indicator is set.
  * @param _w Handle to work object.
  */
 void hb_work_loop( void * _w )
@@ -2003,13 +2120,13 @@ static void filter_loop( void * _f )
 
         buf_out = NULL;
 
-#ifdef USE_QSV
+#if HB_PROJECT_FEATURE_QSV
         hb_buffer_t *last_buf_in = buf_in;
 #endif
 
         f->status = f->work( f, &buf_in, &buf_out );
 
-#ifdef USE_QSV
+#if HB_PROJECT_FEATURE_QSV
         if (f->status == HB_FILTER_DELAY &&
             last_buf_in->qsv_details.filter_details != NULL && buf_out == NULL)
         {

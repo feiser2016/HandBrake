@@ -1,14 +1,14 @@
 /* scan.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
-#include "hbffmpeg.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/hbffmpeg.h"
 
 typedef struct
 {
@@ -75,6 +75,7 @@ hb_thread_t * hb_scan_init( hb_handle_t * handle, volatile int * die,
 
     // Initialize scan state
     hb_state_t state;
+    hb_get_state2(handle, &state);
 #define p state.param.scanning
     state.state   = HB_STATE_SCANNING;
     p.title_cur   = 1;
@@ -155,7 +156,7 @@ static void ScanFunc( void * _data )
         if( data->title_index )
         {
             /* Scan this title only */
-            title = hb_batch_title_scan(data->batch, data->title_index, 0);
+            title = hb_batch_title_scan(data->batch, data->title_index);
             if ( title )
             {
                 hb_list_add( data->title_set->list_title, title );
@@ -169,8 +170,7 @@ static void ScanFunc( void * _data )
                 hb_title_t * title;
 
                 UpdateState1(data, i + 1);
-                title = hb_batch_title_scan(data->batch, i + 1,
-                                            data->min_title_duration);
+                title = hb_batch_title_scan(data->batch, i + 1);
                 if ( title != NULL )
                 {
                     hb_list_add( data->title_set->list_title, title );
@@ -295,12 +295,12 @@ static void ScanFunc( void * _data )
     }
     if (hb_list_count(data->title_set->list_title) > 0)
     {
-        strncpy(data->title_set->path, data->path, 1024);
-        data->title_set->path[1023] = 0;
+        data->title_set->path = strdup(data->path);
     }
     else
     {
-        data->title_set->path[0] = 0;
+        free((char*)data->title_set->path);
+        data->title_set->path = NULL;
     }
 
 finish:
@@ -735,7 +735,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title, int flush )
                     // There are 2 conditions we decode additional
                     // video frames for during scan.
                     // 1. We did not detect IDR frames, so the initial video
-                    //    frames may be corrupt.  We docode extra frames to
+                    //    frames may be corrupt.  We decode extra frames to
                     //    increase the probability of a complete preview frame
                     // 2. Some frames do not contain CC data, even though
                     //    CCs are present in the stream.  So we need to decode
@@ -1002,13 +1002,41 @@ skip_preview:
         }
         title->video_bitrate = vid_info.bitrate;
 
-        if( vid_info.geometry.par.num && vid_info.geometry.par.den )
+        if (data->dvd || data->bd)
         {
+            // DVD/BD doesn't have a container PAR, but it has container DAR
+            // which can be used to compute container PAR
+            hb_reduce(&title->geometry.par.num, &title->geometry.par.den,
+                      title->geometry.height * title->container_dar.num,
+                      title->geometry.width * title->container_dar.den);
+        }
+        if (vid_info.geometry.par.num && vid_info.geometry.par.den)
+        {
+            // title->geometry.par is initially container PAR, but
+            // the video stream almost always also supplies PAR and
+            // is generally more reliable, so use it.
+            //
+            // Check if container PAR and video stream PAR are in agreement
+            if (title->geometry.par.num && title->geometry.par.den &&
+                title->geometry.par.num != vid_info.geometry.par.num &&
+                title->geometry.par.den != vid_info.geometry.par.den)
+            {
+                hb_log("WARNING: Video PAR %d:%d != container PAR %d:%d",
+                    vid_info.geometry.par.num, vid_info.geometry.par.den,
+                    title->geometry.par.num, title->geometry.par.den);
+            }
             title->geometry.par = vid_info.geometry.par;
         }
+        else if (!title->geometry.par.num || !title->geometry.par.den)
+        {
+            // No video PAR found, assume 1:1
+            title->geometry.par.num = title->geometry.par.den = 1;
+        }
+        title->pix_fmt = vid_info.pix_fmt;
         title->color_prim = vid_info.color_prim;
         title->color_transfer = vid_info.color_transfer;
         title->color_matrix = vid_info.color_matrix;
+        title->color_range = vid_info.color_range;
 
         title->video_decode_support = vid_info.video_decode_support;
 
@@ -1298,39 +1326,44 @@ static void LookForAudio(hb_scan_t *scan, hb_title_t * title, hb_buffer_t * b)
                 break;
         }
     }
-
     if (codec_name != NULL && profile_name != NULL)
     {
-        sprintf(audio->config.lang.description, "%s (%s %s)",
-                audio->config.lang.simple, codec_name, profile_name);
+        snprintf(audio->config.lang.description, sizeof(audio->config.lang.description),
+                "%s (%s %s)", audio->config.lang.simple, codec_name, profile_name);
     }
     else if (codec_name != NULL)
     {
-        sprintf(audio->config.lang.description, "%s (%s)",
-                audio->config.lang.simple, codec_name);
+        snprintf(audio->config.lang.description, sizeof(audio->config.lang.description),
+                "%s (%s)", audio->config.lang.simple, codec_name);
     }
     else if (profile_name != NULL)
     {
-        sprintf(audio->config.lang.description, "%s (%s)",
-                audio->config.lang.simple, profile_name);
+        snprintf(audio->config.lang.description, sizeof(audio->config.lang.description),
+                "%s (%s)", audio->config.lang.simple, profile_name);
     }
 
     if (audio->config.lang.attributes & HB_AUDIO_ATTR_VISUALLY_IMPAIRED)
     {
         strncat(audio->config.lang.description, " (Visually Impaired)",
-                sizeof(audio->config.lang.description) - 
+                sizeof(audio->config.lang.description) -
                 strlen(audio->config.lang.description) - 1);
     }
     if (audio->config.lang.attributes & HB_AUDIO_ATTR_COMMENTARY)
     {
         strncat(audio->config.lang.description, " (Director's Commentary 1)",
-                sizeof(audio->config.lang.description) - 
+                sizeof(audio->config.lang.description) -
                 strlen(audio->config.lang.description) - 1);
     }
     if (audio->config.lang.attributes & HB_AUDIO_ATTR_ALT_COMMENTARY)
     {
         strncat(audio->config.lang.description, " (Director's Commentary 2)",
-                sizeof(audio->config.lang.description) - 
+                sizeof(audio->config.lang.description) -
+                strlen(audio->config.lang.description) - 1);
+    }
+    if (audio->config.lang.attributes & HB_AUDIO_ATTR_SECONDARY)
+    {
+        strncat(audio->config.lang.description, " (Secondary)",
+                sizeof(audio->config.lang.description) -
                 strlen(audio->config.lang.description) - 1);
     }
 
@@ -1375,6 +1408,16 @@ static void LookForAudio(hb_scan_t *scan, hb_title_t * title, hb_buffer_t * b)
             default:
                 break;
         }
+    }
+
+    // Append input bitrate in kbps to the end of the description if greater than 1
+    // ffmpeg may report some audio bitrates as 1, not an issue
+    if (audio->config.in.bitrate > 1)
+    {
+        char in_bitrate_str[19];
+        snprintf(in_bitrate_str, 18, " (%d kbps)", audio->config.in.bitrate / 1000);
+        strncat(audio->config.lang.description, in_bitrate_str,
+                sizeof(audio->config.lang.description) - strlen(audio->config.lang.description) - 1);
     }
 
     hb_log( "scan: audio 0x%x: %s, rate=%dHz, bitrate=%d %s", audio->id,
@@ -1424,6 +1467,7 @@ static void UpdateState1(hb_scan_t *scan, int title)
 {
     hb_state_t state;
 
+    hb_get_state2(scan->h, &state);
 #define p state.param.scanning
     /* Update the UI */
     state.state   = HB_STATE_SCANNING;
@@ -1444,6 +1488,7 @@ static void UpdateState2(hb_scan_t *scan, int title)
 {
     hb_state_t state;
 
+    hb_get_state2(scan->h, &state);
 #define p state.param.scanning
     /* Update the UI */
     state.state   = HB_STATE_SCANNING;

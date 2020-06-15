@@ -8,13 +8,13 @@
 "75B-xq-Qbe.title" = "Bildgröße:";
 
 /* Class = "NSButtonCell"; title = "Selection Behavior…"; ObjectID = "a0j-nw-n23"; */
-"a0j-nw-n23.title" = "Auswahlverhalten…";
+"a0j-nw-n23.title" = "Auswahlverhalten …";
 
 /* Class = "NSButton"; ibShadowedToolTip = "Selection Behavior determines the track(s) and settings used when the preset is selected."; ObjectID = "aez-2b-JXx"; */
 "aez-2b-JXx.ibShadowedToolTip" = "Das Auswahlverhalten bestimmt die Spur(en) und Einstellungen die verwendet werden, wenn die Voreinstellung ausgewählt wird.";
 
 /* Class = "NSTextField"; ibShadowedToolTip = "Enter a name for the new preset. This name will be displayed in the presets list."; ObjectID = "aKg-n4-OUS"; */
-"aKg-n4-OUS.ibShadowedToolTip" = "Gib den Namen der Voreinstellung ein. Der Name wird in der Liste der Voreinstellungen angezeigt.";
+"aKg-n4-OUS.ibShadowedToolTip" = "Gebe den Namen der Voreinstellung ein. Der Name wird in der Liste der Voreinstellungen angezeigt.";
 
 /* Class = "NSPopUpButton"; ibShadowedToolTip = "Picture Size controls how video dimensions are applied when selecting the preset.\n\nNone uses the currently set dimensions.\n\nCustom allows you to set a maximum width and/or height.\n\nSource maximum uses the full dimensions of each source."; ObjectID = "bma-pS-phM"; */
 "bma-pS-phM.ibShadowedToolTip" = "Bildgröße kontrolliert wie die Dimensionen des Videos bei Auswahl der Voreinstellung angewendet werden.\n\nKeine: Benutzt die momentanen Dimensionen des Videos.\n\nEigene: Erlaubt die Auswahl der maximalen Höhe und/oder Breite.\n\nQuellenmaximum: Benutzt die maximale Größe des Ausgangsvideos.";
@@ -31,9 +31,6 @@
 /* Class = "NSTextField"; ibShadowedToolTip = "Maximum video storage width in pixels allowed by the preset. Set to 0 for unlimited width."; ObjectID = "gOg-oO-8ar"; */
 "gOg-oO-8ar.ibShadowedToolTip" = "Maximale Breite des Videos in Pixel, das durch die Voreinstellung erlaubt wird. Für unbegrenzte Breite auf 0 setzen.";
 
-/* Class = "NSBox"; title = "Box"; ObjectID = "H9n-64-GXz"; */
-"H9n-64-GXz.title" = "Box";
-
 /* Class = "NSTextFieldCell"; title = "Description:"; ObjectID = "hc8-1h-Jye"; */
 "hc8-1h-Jye.title" = "Beschreibung:";
 
@@ -47,9 +44,9 @@
 "jhj-Et-ncF.title" = "Voreinstellungsname:";
 
 /* Class = "NSButtonCell"; title = "Selection Behavior…"; ObjectID = "LPX-Rc-KLa"; */
-"LPX-Rc-KLa.title" = "Verhalten wählen…";
+"LPX-Rc-KLa.title" = "Auswahlverhalten …";
 
-/* Class = "NSTextField"; ibExternalAccessibilityDescription = "PictureHeight"; ObjectID = "Mga-dS-8BF"; */
+/* Class = "NSTextField"; ibExternalAccessibilityDescription = "Picture Height"; ObjectID = "Mga-dS-8BF"; */
 "Mga-dS-8BF.ibExternalAccessibilityDescription" = "Bildhöhe";
 
 /* Class = "NSTextField"; ibShadowedToolTip = "Maximum video storage height in pixels allowed by the preset. Set to 0 for unlimited height."; ObjectID = "Mga-dS-8BF"; */
@@ -65,13 +62,13 @@
 "OYE-GG-Vo3.title" = "Untertitel:";
 
 /* Class = "NSMenu"; title = "OtherViews"; ObjectID = "qsA-gt-zdK"; */
-"qsA-gt-zdK.title" = "Andere Ansicht";
+"qsA-gt-zdK.title" = "OtherViews";
 
 /* Class = "NSMenuItem"; title = "New Category…"; ObjectID = "Sf8-HP-mhE"; */
-"Sf8-HP-mhE.title" = "Neue Kategorie…";
+"Sf8-HP-mhE.title" = "Neue Kategorie …";
 
 /* Class = "NSMenu"; title = "OtherViews"; ObjectID = "tQ1-PN-kvh"; */
-"tQ1-PN-kvh.title" = "Andere Ansicht";
+"tQ1-PN-kvh.title" = "OtherViews";
 
 /* Class = "NSPopUpButton"; ibShadowedToolTip = "Picture Size controls how video dimensions are applied when selecting the preset.\n\nNone uses the currently set dimensions.\n\nCustom allows you to set a maximum width and/or height.\n\nSource maximum uses the full dimensions of each source."; ObjectID = "z6B-ig-ouq"; */
 "z6B-ig-ouq.ibShadowedToolTip" = "Bildgröße kontrolliert wie die Dimensionen des Videos bei Auswahl der Voreinstellung angewendet werden.\n\nKeine: Benutzt die momentanen Dimensionen des Videos.\n\nEigene: Erlaubt die Auswahl der maximalen Höhe und/oder Breite.\n\nQuellenmaximum: Benutzt die maximale Größe des Ausgangsvideos.";

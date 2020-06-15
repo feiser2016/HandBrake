@@ -26,14 +26,24 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 \* ********************************************************************* */
 
-#ifdef USE_QSV
+#include "handbrake/project.h"
 
-#include "hb.h"
-#include "nal_units.h"
-#include "qsv_common.h"
-#include "qsv_memory.h"
-#include "h264_common.h"
-#include "h265_common.h"
+#if HB_PROJECT_FEATURE_QSV
+
+#include "handbrake/handbrake.h"
+#include "handbrake/nal_units.h"
+#include "handbrake/hbffmpeg.h"
+#include "handbrake/qsv_common.h"
+#include "handbrake/qsv_memory.h"
+#include "handbrake/h264_common.h"
+#include "handbrake/h265_common.h"
+
+#include "libavutil/hwcontext_qsv.h"
+#include "libavutil/hwcontext.h"
+#include <mfx/mfxvideo.h>
+
+extern AVBufferRef *hb_hw_device_ctx;
+EncQSVFramesContext hb_enc_qsv_frames_ctx;
 
 /*
  * The frame info struct remembers information about each frame across calls to
@@ -75,6 +85,7 @@ struct hb_work_private_s
     hb_qsv_param_t       param;
     hb_qsv_space         enc_space;
     hb_qsv_info_t      * qsv_info;
+    hb_display_t       * display;
 
     hb_chapter_queue_t * chapter_queue;
 
@@ -304,12 +315,12 @@ static int qsv_hevc_make_header(hb_work_object_t *w, mfxSession session)
     }
 
     /* need more space for 10bits */
-    int bpp12 = 3;
-    if (pv->param.videoParam->mfx.FrameInfo.FourCC == MFX_FOURCC_P010)
+    if (pv->param.videoParam->mfx.FrameInfo.FourCC == MFX_FOURCC_P010 ||
+        pv->param.videoParam->mfx.CodecId == MFX_CODEC_HEVC)
     {
          hb_buffer_realloc(bitstream_buf,bitstream_buf->size*2);
-         bpp12 = 6;
     }
+    int bpp12 = (pv->param.videoParam->mfx.FrameInfo.FourCC == MFX_FOURCC_P010) ? 6 : 3;
     bitstream.Data      = bitstream_buf->data;
     bitstream.MaxLength = bitstream_buf->alloc;
 
@@ -449,6 +460,277 @@ end:
     return ret;
 }
 
+static void mids_buf_free(void *opaque, uint8_t *data)
+{
+    AVBufferRef *hw_frames_ref = opaque;
+    av_buffer_unref(&hw_frames_ref);
+    av_freep(&data);
+}
+
+static enum AVPixelFormat qsv_map_fourcc(uint32_t fourcc)
+{
+    switch (fourcc) {
+    case MFX_FOURCC_NV12: return AV_PIX_FMT_NV12;
+    case MFX_FOURCC_P010: return AV_PIX_FMT_P010;
+    case MFX_FOURCC_P8:   return AV_PIX_FMT_PAL8;
+    }
+    return AV_PIX_FMT_NONE;
+}
+
+AVBufferRef *hb_qsv_create_mids(AVBufferRef *hw_frames_ref)
+{
+    AVHWFramesContext    *frames_ctx = (AVHWFramesContext*)hw_frames_ref->data;
+    AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
+    int                  nb_surfaces = frames_hwctx->nb_surfaces;
+
+    AVBufferRef *mids_buf, *hw_frames_ref1;
+    QSVMid *mids;
+    int i;
+
+    hw_frames_ref1 = av_buffer_ref(hw_frames_ref);
+    if (!hw_frames_ref1)
+        return NULL;
+
+    mids = av_mallocz_array(nb_surfaces, sizeof(*mids));
+    if (!mids) {
+        av_buffer_unref(&hw_frames_ref1);
+        return NULL;
+    }
+
+    mids_buf = av_buffer_create((uint8_t*)mids, nb_surfaces * sizeof(*mids),
+                                mids_buf_free, hw_frames_ref1, 0);
+    if (!mids_buf) {
+        av_buffer_unref(&hw_frames_ref1);
+        av_freep(&mids);
+        return NULL;
+    }
+
+    for (i = 0; i < nb_surfaces; i++) {
+        QSVMid *mid = &mids[i];
+        mid->handle        = frames_hwctx->surfaces[i].Data.MemId;
+        mid->texture       = frames_hwctx->texture;
+        mid->hw_frames_ref = hw_frames_ref1;
+    }
+
+    return mids_buf;
+}
+
+static int qsv_setup_mids(mfxFrameAllocResponse *resp, AVBufferRef *hw_frames_ref,
+                          AVBufferRef *mids_buf)
+{
+    AVHWFramesContext    *frames_ctx = (AVHWFramesContext*)hw_frames_ref->data;
+    AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
+    QSVMid                     *mids = (QSVMid*)mids_buf->data;
+    int                  nb_surfaces = frames_hwctx->nb_surfaces;
+    int i;
+
+    // the allocated size of the array is two larger than the number of
+    // surfaces, we store the references to the frames context and the
+    // QSVMid array there
+    resp->mids = av_mallocz_array(nb_surfaces + 2, sizeof(*resp->mids));
+    if (!resp->mids)
+        return AVERROR(ENOMEM);
+
+    for (i = 0; i < nb_surfaces; i++)
+        resp->mids[i] = &mids[i];
+    resp->NumFrameActual = nb_surfaces;
+
+    resp->mids[resp->NumFrameActual] = (mfxMemId)av_buffer_ref(hw_frames_ref);
+    if (!resp->mids[resp->NumFrameActual]) {
+        av_freep(&resp->mids);
+        return AVERROR(ENOMEM);
+    }
+
+    resp->mids[resp->NumFrameActual + 1] = av_buffer_ref(mids_buf);
+    if (!resp->mids[resp->NumFrameActual + 1]) {
+        av_buffer_unref((AVBufferRef**)&resp->mids[resp->NumFrameActual]);
+        av_freep(&resp->mids);
+        return AVERROR(ENOMEM);
+    }
+
+    return 0;
+}
+
+static mfxStatus hb_qsv_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
+                                 mfxFrameAllocResponse *resp)
+{
+    EncQSVFramesContext *ctx = pthis;
+    int ret;
+
+    /* this should only be called from an encoder or decoder and
+     * only allocates video memory frames */
+    if (!(req->Type & (MFX_MEMTYPE_VIDEO_MEMORY_DECODER_TARGET |
+                       MFX_MEMTYPE_VIDEO_MEMORY_PROCESSOR_TARGET))         ||
+        !(req->Type & (MFX_MEMTYPE_FROM_DECODE | MFX_MEMTYPE_FROM_ENCODE)))
+        return MFX_ERR_UNSUPPORTED;
+
+    if (req->Type & MFX_MEMTYPE_EXTERNAL_FRAME) {
+        /* external frames -- fill from the caller-supplied frames context */
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
+        AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
+        mfxFrameInfo      *i  = &req->Info;
+        mfxFrameInfo      *i1 = &frames_hwctx->surfaces[0].Info;
+
+        if (i->Width  > i1->Width  || i->Height > i1->Height ||
+            i->FourCC != i1->FourCC || i->ChromaFormat != i1->ChromaFormat) {
+            hb_error("Mismatching surface properties in an "
+                   "allocation request: %dx%d %d %d vs %dx%d %d %d\n",
+                   i->Width,  i->Height,  i->FourCC,  i->ChromaFormat,
+                   i1->Width, i1->Height, i1->FourCC, i1->ChromaFormat);
+            return MFX_ERR_UNSUPPORTED;
+        }
+
+        ret = qsv_setup_mids(resp, ctx->hw_frames_ctx, ctx->mids_buf);
+        if (ret < 0) {
+            hb_error("Error filling an external frame allocation request\n");
+            return MFX_ERR_MEMORY_ALLOC;
+        }
+    } else if (req->Type & MFX_MEMTYPE_INTERNAL_FRAME) {
+        /* internal frames -- allocate a new hw frames context */
+        AVHWFramesContext *ext_frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
+        mfxFrameInfo      *i  = &req->Info;
+
+        AVBufferRef *frames_ref, *mids_buf;
+        AVHWFramesContext *frames_ctx;
+        AVQSVFramesContext *frames_hwctx;
+
+        frames_ref = av_hwframe_ctx_alloc(ext_frames_ctx->device_ref);
+        if (!frames_ref)
+            return MFX_ERR_MEMORY_ALLOC;
+
+        frames_ctx   = (AVHWFramesContext*)frames_ref->data;
+        frames_hwctx = frames_ctx->hwctx;
+
+        frames_ctx->format            = AV_PIX_FMT_QSV;
+        frames_ctx->sw_format         = qsv_map_fourcc(i->FourCC);
+        frames_ctx->width             = i->Width;
+        frames_ctx->height            = i->Height;
+        frames_ctx->initial_pool_size = req->NumFrameSuggested;
+
+        frames_hwctx->frame_type      = req->Type;
+
+        ret = av_hwframe_ctx_init(frames_ref);
+        if (ret < 0) {
+            hb_error("Error initializing a frames context for an internal frame "
+                   "allocation request\n");
+            av_buffer_unref(&frames_ref);
+            return MFX_ERR_MEMORY_ALLOC;
+        }
+
+        mids_buf = hb_qsv_create_mids(frames_ref);
+        if (!mids_buf) {
+            av_buffer_unref(&frames_ref);
+            return MFX_ERR_MEMORY_ALLOC;
+        }
+
+        ret = qsv_setup_mids(resp, frames_ref, mids_buf);
+        av_buffer_unref(&mids_buf);
+        av_buffer_unref(&frames_ref);
+        if (ret < 0) {
+            hb_error("Error filling an internal frame allocation request\n");
+            return MFX_ERR_MEMORY_ALLOC;
+        }
+    } else {
+        return MFX_ERR_UNSUPPORTED;
+    }
+
+    return MFX_ERR_NONE;
+}
+
+static mfxStatus hb_qsv_frame_free(mfxHDL pthis, mfxFrameAllocResponse *resp)
+{
+    av_buffer_unref((AVBufferRef**)&resp->mids[resp->NumFrameActual]);
+    av_buffer_unref((AVBufferRef**)&resp->mids[resp->NumFrameActual + 1]);
+    av_freep(&resp->mids);
+    return MFX_ERR_NONE;
+}
+
+static mfxStatus hb_qsv_frame_lock(mfxHDL pthis, mfxMemId mid, mfxFrameData *ptr)
+{
+    QSVMid *qsv_mid = mid;
+    AVHWFramesContext *hw_frames_ctx = (AVHWFramesContext*)qsv_mid->hw_frames_ref->data;
+    AVQSVFramesContext *hw_frames_hwctx = hw_frames_ctx->hwctx;
+    int ret;
+
+    if (qsv_mid->locked_frame)
+        return MFX_ERR_UNDEFINED_BEHAVIOR;
+
+    /* Allocate a system memory frame that will hold the mapped data. */
+    qsv_mid->locked_frame = av_frame_alloc();
+    if (!qsv_mid->locked_frame)
+        return MFX_ERR_MEMORY_ALLOC;
+    qsv_mid->locked_frame->format  = hw_frames_ctx->sw_format;
+
+    /* wrap the provided handle in a hwaccel AVFrame */
+    qsv_mid->hw_frame = av_frame_alloc();
+    if (!qsv_mid->hw_frame)
+        goto fail;
+
+    qsv_mid->hw_frame->data[3] = (uint8_t*)&qsv_mid->surf;
+    qsv_mid->hw_frame->format  = AV_PIX_FMT_QSV;
+
+    // doesn't really matter what buffer is used here
+    qsv_mid->hw_frame->buf[0]  = av_buffer_alloc(1);
+    if (!qsv_mid->hw_frame->buf[0])
+        goto fail;
+
+    qsv_mid->hw_frame->width   = hw_frames_ctx->width;
+    qsv_mid->hw_frame->height  = hw_frames_ctx->height;
+
+    qsv_mid->hw_frame->hw_frames_ctx = av_buffer_ref(qsv_mid->hw_frames_ref);
+    if (!qsv_mid->hw_frame->hw_frames_ctx)
+        goto fail;
+
+    qsv_mid->surf.Info = hw_frames_hwctx->surfaces[0].Info;
+    qsv_mid->surf.Data.MemId = qsv_mid->handle;
+
+    /* map the data to the system memory */
+    ret = av_hwframe_map(qsv_mid->locked_frame, qsv_mid->hw_frame,
+                         AV_HWFRAME_MAP_DIRECT);
+    if (ret < 0)
+        goto fail;
+
+    ptr->Pitch = qsv_mid->locked_frame->linesize[0];
+    ptr->Y     = qsv_mid->locked_frame->data[0];
+    ptr->U     = qsv_mid->locked_frame->data[1];
+    ptr->V     = qsv_mid->locked_frame->data[1] + 1;
+
+    return MFX_ERR_NONE;
+fail:
+    av_frame_free(&qsv_mid->hw_frame);
+    av_frame_free(&qsv_mid->locked_frame);
+    return MFX_ERR_MEMORY_ALLOC;
+}
+
+static mfxStatus hb_qsv_frame_unlock(mfxHDL pthis, mfxMemId mid, mfxFrameData *ptr)
+{
+    QSVMid *qsv_mid = mid;
+
+    av_frame_free(&qsv_mid->locked_frame);
+    av_frame_free(&qsv_mid->hw_frame);
+
+    return MFX_ERR_NONE;
+}
+
+static mfxStatus hb_qsv_frame_get_hdl(mfxHDL pthis, mfxMemId mid, mfxHDL *hdl)
+{
+    QSVMid *qsv_mid = (QSVMid*)mid;
+
+    if (qsv_mid->texture) {
+        mfxHDLPair *pPair  =  (mfxHDLPair*)hdl;
+        pPair->first  = qsv_mid->texture;
+        pPair->second = qsv_mid->handle;
+    } else {
+        *hdl = qsv_mid->handle;
+    }
+
+    return MFX_ERR_NONE;
+}
+
+#define QSV_RUNTIME_VERSION_ATLEAST(MFX_VERSION, MAJOR, MINOR) \
+    (MFX_VERSION.Major > (MAJOR)) ||                           \
+    (MFX_VERSION.Major == (MAJOR) && MFX_VERSION.Minor >= (MINOR))
+
 int qsv_enc_init(hb_work_private_t *pv)
 {
     hb_qsv_context *qsv = pv->job->qsv.ctx;
@@ -484,6 +766,49 @@ int qsv_enc_init(hb_work_private_t *pv)
 
             // re-use the session from encqsvInit
             qsv->mfx_session = pv->mfx_session;
+        }
+        else
+        {
+            mfxStatus err;
+
+            mfxVersion    ver;
+            mfxIMPL       impl;
+
+            AVHWDeviceContext    *device_ctx = (AVHWDeviceContext*)hb_hw_device_ctx->data;
+            AVQSVDeviceContext *device_hwctx = device_ctx->hwctx;
+            mfxSession        parent_session = device_hwctx->session;
+
+            err = MFXQueryIMPL(parent_session, &impl);
+            if (err != MFX_ERR_NONE)
+            {
+                hb_error("Error querying the session attributes");
+                return -1;
+            }
+
+            err = MFXQueryVersion(parent_session, &ver);
+            if (err != MFX_ERR_NONE)
+            {
+                hb_error("Error querying the session attributes");
+                return -1;
+            }
+
+            // reuse parent session
+            qsv->mfx_session = parent_session;
+            mfxFrameAllocator frame_allocator = {
+                .pthis  = &hb_enc_qsv_frames_ctx,
+                .Alloc  = hb_qsv_frame_alloc,
+                .Lock   = hb_qsv_frame_lock,
+                .Unlock = hb_qsv_frame_unlock,
+                .GetHDL = hb_qsv_frame_get_hdl,
+                .Free   = hb_qsv_frame_free,
+            };
+
+            err = MFXVideoCORE_SetFrameAllocator(qsv->mfx_session, &frame_allocator);
+            if (err != MFX_ERR_NONE)
+            {
+                hb_log("encqsvInit: MFXVideoCORE_SetFrameAllocator error %d", err);
+                return -1;
+            }
         }
         qsv->enc_space = qsv_encode = &pv->enc_space;
     }
@@ -588,7 +913,7 @@ int qsv_enc_init(hb_work_private_t *pv)
     // setup surface allocation
     pv->param.videoParam->IOPattern = (pv->is_sys_mem                 ?
                                        MFX_IOPATTERN_IN_SYSTEM_MEMORY :
-                                       MFX_IOPATTERN_IN_OPAQUE_MEMORY);
+                                       MFX_IOPATTERN_IN_VIDEO_MEMORY);
     memset(&qsv_encode->request, 0, sizeof(mfxFrameAllocRequest) * 2);
     sts = MFXVideoENCODE_QueryIOSurf(qsv->mfx_session,
                                      pv->param.videoParam,
@@ -626,21 +951,20 @@ int qsv_enc_init(hb_work_private_t *pv)
     }
     else
     {
-        hb_qsv_space *in_space = qsv->dec_space;
-        if (pv->is_vpp_present)
+        qsv_encode->surface_num = FFMIN(qsv_encode->request[0].NumFrameSuggested +
+                                        pv->max_async_depth, HB_QSV_SURFACE_NUM);
+        if (qsv_encode->surface_num <= 0)
         {
-            // we get our input from VPP instead
-            in_space = hb_qsv_list_item(qsv->vpp_space,
-                                        hb_qsv_list_count(qsv->vpp_space) - 1);
+            qsv_encode->surface_num = HB_QSV_SURFACE_NUM;
         }
-        // introduced in API 1.3
-        memset(&qsv_encode->ext_opaque_alloc, 0, sizeof(mfxExtOpaqueSurfaceAlloc));
-        qsv_encode->ext_opaque_alloc.Header.BufferId = MFX_EXTBUFF_OPAQUE_SURFACE_ALLOCATION;
-        qsv_encode->ext_opaque_alloc.Header.BufferSz = sizeof(mfxExtOpaqueSurfaceAlloc);
-        qsv_encode->ext_opaque_alloc.In.Surfaces     = in_space->p_surfaces;
-        qsv_encode->ext_opaque_alloc.In.NumSurface   = in_space->surface_num;
-        qsv_encode->ext_opaque_alloc.In.Type         = qsv_encode->request[0].Type;
-        pv->param.videoParam->ExtParam[pv->param.videoParam->NumExtParam++] = (mfxExtBuffer*)&qsv_encode->ext_opaque_alloc;
+        // Use only when VPP will be fixed
+        // hb_qsv_space *in_space = qsv->dec_space;
+        // if (pv->is_vpp_present)
+        // {
+        //     // we get our input from VPP instead
+        //     in_space = hb_qsv_list_item(qsv->vpp_space,
+        //                                 hb_qsv_list_count(qsv->vpp_space) - 1);
+        // }
     }
 
     // allocate sync points
@@ -664,7 +988,6 @@ int qsv_enc_init(hb_work_private_t *pv)
         *job->die = 1;
         return -1;
     }
-    qsv_encode->is_init_done = 1;
 
     // query and log actual implementation details
     if ((MFXQueryIMPL   (qsv->mfx_session, &impl)    == MFX_ERR_NONE) &&
@@ -678,6 +1001,7 @@ int qsv_enc_init(hb_work_private_t *pv)
         hb_log("qsv_enc_init: MFXQueryIMPL/MFXQueryVersion failure");
     }
 
+    qsv_encode->is_init_done = 1;
     pv->init_done = 1;
     return 0;
 }
@@ -692,7 +1016,7 @@ int encqsvInit(hb_work_object_t *w, hb_job_t *job)
     hb_work_private_t *pv = calloc(1, sizeof(hb_work_private_t));
     w->private_data       = pv;
 
-    pv->is_sys_mem         = 1; // TODO: re-implement QSV VPP filtering support
+    pv->is_sys_mem         = hb_qsv_full_path_is_enabled(job) ? 0 : 1; // TODO: re-implement QSV VPP filtering support
     pv->job                = job;
     pv->qsv_info           = hb_qsv_info_get(job->vcodec);
     pv->delayed_processing = hb_list_init();
@@ -713,9 +1037,9 @@ int encqsvInit(hb_work_object_t *w, hb_job_t *job)
     pv->param.videoParam->AsyncDepth = job->qsv.async_depth;
 
     // set and enable colorimetry (video signal information)
-    pv->param.videoSignalInfo.ColourPrimaries          = job->color_prim;
-    pv->param.videoSignalInfo.TransferCharacteristics  = job->color_transfer;
-    pv->param.videoSignalInfo.MatrixCoefficients       = job->color_matrix;
+    pv->param.videoSignalInfo.ColourPrimaries          = hb_output_color_prim(job);
+    pv->param.videoSignalInfo.TransferCharacteristics  = hb_output_color_transfer(job);
+    pv->param.videoSignalInfo.MatrixCoefficients       = hb_output_color_matrix(job);
     pv->param.videoSignalInfo.ColourDescriptionPresent = 1;
 
     // parse user-specified encoder options, if present
@@ -763,9 +1087,9 @@ int encqsvInit(hb_work_object_t *w, hb_job_t *job)
     // reload colorimetry in case values were set in encoder_options
     if (pv->param.videoSignalInfo.ColourDescriptionPresent)
     {
-        job->color_prim        = pv->param.videoSignalInfo.ColourPrimaries;
-        job->color_transfer    = pv->param.videoSignalInfo.TransferCharacteristics;
-        job->color_matrix      = pv->param.videoSignalInfo.MatrixCoefficients;
+        job->color_prim_override     = pv->param.videoSignalInfo.ColourPrimaries;
+        job->color_transfer_override = pv->param.videoSignalInfo.TransferCharacteristics;
+        job->color_matrix_override   = pv->param.videoSignalInfo.MatrixCoefficients;
     }
 
     // sanitize values that may exceed the Media SDK variable size
@@ -936,7 +1260,7 @@ int encqsvInit(hb_work_object_t *w, hb_job_t *job)
         else
         {
             // introduced in API 1.1
-            // HEVC 10b has QP range as [-12;51] 
+            // HEVC 10b has QP range as [-12;51]
             // with shift +12 needed to be in QSV's U16 range
             unsigned int upper_limit = 51;
 
@@ -1082,6 +1406,18 @@ int encqsvInit(hb_work_object_t *w, hb_job_t *job)
     {
         hb_error("encqsvInit: MFXInit failed (%d)", err);
         return -1;
+    }
+
+    if (pv->qsv_info->implementation & MFX_IMPL_HARDWARE_ANY)
+    {
+        // On linux, the handle to the VA display must be set.
+        // This code is essentiall a NOP other platforms.
+        pv->display = hb_qsv_display_init();
+        if (pv->display != NULL)
+        {
+            MFXVideoCORE_SetHandle(session, pv->display->mfxType,
+                                   (mfxHDL)pv->display->handle);
+        }
     }
 
     /* Query the API version for hb_qsv_load_plugins */
@@ -1233,8 +1569,9 @@ int encqsvInit(hb_work_object_t *w, hb_job_t *job)
     }
 
     // log code path and main output settings
-    hb_log("encqsvInit: using %s path",
-           pv->is_sys_mem ? "encode-only" : "full QSV");
+    hb_log("encqsvInit: using %s%s path",
+           pv->is_sys_mem ? "encode-only" : "full QSV",
+           videoParam.mfx.LowPower == MFX_CODINGOPTION_ON ? " (LowPower)" : "" );
     hb_log("encqsvInit: %s %s profile @ level %s",
            hb_qsv_codec_name  (videoParam.mfx.CodecId),
            hb_qsv_profile_name(videoParam.mfx.CodecId, videoParam.mfx.CodecProfile),
@@ -1430,6 +1767,8 @@ void encqsvClose(hb_work_object_t *w)
             /* QSV context cleanup and MFXClose */
             hb_qsv_context_clean(qsv_ctx);
 
+            hb_display_close(&pv->display);
+
             if (qsv_enc_space != NULL)
             {
                 if (qsv_enc_space->is_init_done)
@@ -1476,6 +1815,8 @@ void encqsvClose(hb_work_object_t *w)
                 av_freep(&qsv_ctx);
             }
         }
+
+        hb_qsv_uninit_enc();
     }
 
     if (pv != NULL)
@@ -1738,15 +2079,6 @@ static int qsv_enc_work(hb_work_private_t *pv,
                                                   NULL, surface, task->bs,
                                                   qsv_enc_space->p_syncp[sync_idx]->p_sync);
 
-            if (sts == MFX_ERR_MORE_DATA || (sts >= MFX_ERR_NONE &&
-                                             sts != MFX_WRN_DEVICE_BUSY))
-            {
-                if (surface != NULL && !pv->is_sys_mem)
-                {
-                    ff_qsv_atomic_dec(&surface->Data.Locked);
-                }
-            }
-
             if (sts == MFX_ERR_MORE_DATA)
             {
                 if (qsv_atom != NULL)
@@ -1820,6 +2152,12 @@ static int qsv_enc_work(hb_work_private_t *pv,
                 /* perform a sync operation to get the output bitstream */
                 hb_qsv_wait_on_sync(qsv_ctx, task->stage);
 
+                mfxFrameSurface1 *surface = task->stage->in.p_surface;
+                if(!pv->is_sys_mem && surface)
+                {
+                    hb_qsv_release_surface_from_pool(surface->Data.MemId);
+                }
+
                 if (task->bs->DataLength > 0)
                 {
                     hb_qsv_list *pipe = hb_qsv_pipe_by_stage(qsv_ctx->pipes,
@@ -1851,7 +2189,6 @@ int encqsvWork(hb_work_object_t *w, hb_buffer_t **buf_in, hb_buffer_t **buf_out)
     hb_work_private_t *pv = w->private_data;
     hb_buffer_t *in       = *buf_in;
     hb_job_t *job         = pv->job;
-
     while (qsv_enc_init(pv) >= 2)
     {
         hb_qsv_sleep(1); // encoding not initialized, wait and repeat the call
@@ -1896,8 +2233,28 @@ int encqsvWork(hb_work_object_t *w, hb_buffer_t **buf_in, hb_buffer_t **buf_out)
     }
     else
     {
-        qsv_atom = in->qsv_details.qsv_atom;
-        surface  = hb_qsv_get_last_stage(qsv_atom)->out.p_surface;
+#if HB_PROJECT_FEATURE_QSV
+        QSVMid *mid = NULL;
+        if(in->qsv_details.frame)
+        {
+            surface = ((mfxFrameSurface1*)in->qsv_details.frame->data[3]);
+            mid = surface->Data.MemId;
+        }
+        else
+        {
+            // Create black buffer in the begining of the encoding, usually first 2 frames
+            hb_qsv_get_free_surface_from_pool(HB_POOL_SURFACE_SIZE - HB_POOL_ENCODER_SIZE, HB_POOL_SURFACE_SIZE, &mid, &surface);
+        }
+
+        if(surface)
+        {
+            hb_qsv_replace_surface_mid(mid, surface);
+        }
+        else
+        {
+            goto fail;
+        }
+#endif
         // At this point, enc_qsv takes ownership of the QSV resources
         // in the 'in' buffer.
         in->qsv_details.qsv_atom = NULL;
@@ -1994,7 +2351,12 @@ int encqsvWork(hb_work_object_t *w, hb_buffer_t **buf_in, hb_buffer_t **buf_out)
     {
         goto fail;
     }
-
+#if HB_PROJECT_FEATURE_QSV
+    if (in->qsv_details.frame)
+    {
+        in->qsv_details.frame->data[3] = 0;
+    }
+#endif
     *buf_out = hb_buffer_list_clear(&pv->encoded_frames);
     return HB_WORK_OK;
 
@@ -2008,4 +2370,4 @@ fail:
     return HB_WORK_ERROR;
 }
 
-#endif // USE_QSV
+#endif // HB_PROJECT_FEATURE_QSV

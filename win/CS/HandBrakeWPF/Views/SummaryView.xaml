@@ -23,7 +23,7 @@
         <!-- Column 1 -->
         <Grid Grid.Column="0" MinWidth="325" MaxWidth="400" >
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="75" />
+                <ColumnDefinition Width="80" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
@@ -46,51 +46,52 @@
             </Grid.RowDefinitions>
 
             <Grid.Resources>
-                <Style TargetType="TextBlock">
+                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                     <Setter Property="Margin" Value="0,3,0,3" />
                 </Style>
-                <Style TargetType="CheckBox">
+                <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
                     <Setter Property="Margin" Value="0,2,0,2" />
                 </Style>
             </Grid.Resources>
 
 
-            <TextBlock Text="Format:" FontWeight="Bold" Grid.Row="0" VerticalAlignment="Center" />
+            <TextBlock Text="{x:Static Properties:Resources.MainView_Format}" FontSize="12" FontWeight="Bold" Grid.Row="0" VerticalAlignment="Center" />
             <ComboBox Name="Container" Width="100" HorizontalAlignment="Left"  Grid.Row="0" Grid.Column="1"
                               ToolTip="{x:Static Properties:ResourcesTooltips.MainView_Mux}" VerticalAlignment="Center"
                               ItemsSource="{Binding OutputFormats, Converter={StaticResource enumComboConverter}}"
-                              SelectedItem="{Binding SelectedOutputFormat, Converter={StaticResource enumComboConverter}}" />
+                              SelectedItem="{Binding SelectedOutputFormat, Converter={StaticResource enumComboConverter}}" 
+                              AutomationProperties.Name="{x:Static Properties:Resources.MainView_Format}" />
             <CheckBox Name="WebOptimized" VerticalAlignment="Center" Grid.Row="1" Grid.Column="1"
-                              Content="{x:Static Properties:ResourcesUI.MainView_WebOptimized}"
+                              Content="{x:Static Properties:Resources.MainView_WebOptimized}"
                               IsChecked="{Binding Path=OptimizeMP4}"
                               ToolTip="{x:Static Properties:ResourcesTooltips.MainView_Optimise}"
-                              Visibility="{Binding IsMkv, Converter={StaticResource boolToVisConverter}, ConverterParameter=true}" />
+                              Visibility="{Binding IsMkvOrWebm, Converter={StaticResource boolToVisConverter}, ConverterParameter=true}" />
             <CheckBox Name="AlignAVStart" VerticalAlignment="Center" Grid.Row="2" Grid.Column="1"
-                              Content="{x:Static Properties:ResourcesUI.MainView_AlignAVStart}"
+                              Content="{x:Static Properties:Resources.MainView_AlignAVStart}"
                               ToolTip="{x:Static Properties:ResourcesTooltips.MainView_AlignAVStart}"
                               IsChecked="{Binding Path=AlignAVStart}"
-                              Visibility="{Binding IsMkv, Converter={StaticResource boolToVisConverter}, ConverterParameter=true}" />
+                              Visibility="{Binding IsMkvOrWebm, Converter={StaticResource boolToVisConverter}, ConverterParameter=true}" />
             <CheckBox Name="iPod5G" VerticalAlignment="Center" Grid.Row="3" Grid.Column="1"
-                              Content="{x:Static Properties:ResourcesUI.MainView_iPod5G}"
+                              Content="{x:Static Properties:Resources.MainView_iPod5G}"
                               ToolTip="{x:Static Properties:ResourcesTooltips.MainView_IpodAtom}"
                               IsChecked="{Binding Path=IPod5GSupport}"
-                              Visibility="{Binding IsMkv, Converter={StaticResource boolToVisConverter},  ConverterParameter=true}" />
+                              Visibility="{Binding IsIpodAtomVisible, Converter={StaticResource boolToVisConverter}}" />
 
-            <TextBlock Text="Tracks:" FontWeight="Bold" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" />
+            <TextBlock Text="{x:Static Properties:Resources.MainView_Tracks}" FontSize="12" FontWeight="Bold" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" />
             <TextBlock Text="{Binding VideoTrackInfo}" Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" />
             <TextBlock Text="{Binding AudioTrackInfo}" Grid.Row="6" Grid.Column="1" TextWrapping="Wrap" />
             <TextBlock Text="{Binding SubtitleTrackInfo}" Grid.Row="7" Grid.Column="1" TextWrapping="Wrap" />
             <TextBlock Text="{Binding ChapterInfo}" Grid.Row="8" Grid.Column="1" />
 
-            <TextBlock Text="Filters:" FontWeight="Bold" Grid.Row="10" Grid.Column="0" VerticalAlignment="Center" />
+            <TextBlock Text="{x:Static Properties:Resources.MainView_Filters}" FontSize="12" FontWeight="Bold" Grid.Row="10" Grid.Column="0" VerticalAlignment="Center" />
             <TextBlock Text="{Binding FiltersInfo}" Grid.Row="10" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Stretch" TextWrapping="Wrap" />
 
 
 
-            <TextBlock Text="Size:" FontWeight="Bold" Grid.Row="12" Grid.Column="0" VerticalAlignment="Center" />
+            <TextBlock Text="{x:Static Properties:Resources.MainView_Size}" FontSize="12" FontWeight="Bold" Grid.Row="12" Grid.Column="0" VerticalAlignment="Center" />
             <TextBlock Text="{Binding DimensionInfo}" HorizontalAlignment="Left" VerticalAlignment="Center"  Grid.Row="12" Grid.Column="1" />
 
-            <TextBlock Text="Aspect:" FontSize="14" Grid.Row="13" Grid.Column="0" VerticalAlignment="Center" Visibility="Collapsed" />
+            <TextBlock Text="{x:Static Properties:Resources.MainView_Aspect}" FontSize="14" Grid.Row="13" Grid.Column="0" VerticalAlignment="Center" Visibility="Collapsed" />
             <TextBlock Text="{Binding AspectInfo}" HorizontalAlignment="Left" VerticalAlignment="Center"  Grid.Row="13" Grid.Column="1" Margin="5,0,0,0" Visibility="Collapsed" />
         </Grid>
 

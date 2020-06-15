@@ -1,6 +1,6 @@
 /* dectx3gsub.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -19,8 +19,8 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include "hb.h"
-#include "colormap.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/colormap.h"
 
 struct hb_work_private_s
 {

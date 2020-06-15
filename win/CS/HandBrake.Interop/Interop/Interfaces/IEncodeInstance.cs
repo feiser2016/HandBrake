@@ -27,13 +27,18 @@ namespace HandBrake.Interop.Interop.Interfaces
         /// </summary>
         event EventHandler<EncodeProgressEventArgs> EncodeProgress;
 
+        bool IsRemoteInstance { get; }
+
         /// <summary>
         /// Initializes this instance.
         /// </summary>
         /// <param name="verbosity">
         /// The code for the logging verbosity to use.
         /// </param>
-        void Initialize(int verbosity);
+        /// <param name="noHardware">
+        /// Turn off Hardware Acceleration 
+        /// </param>
+        void Initialize(int verbosity, bool noHardware);
 
         /// <summary>
         /// Frees any resources associated with this object.

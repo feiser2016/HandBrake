@@ -9,8 +9,8 @@
 #import "HBCodingUtilities.h"
 #import "HBMutablePreset.h"
 
-#import "hb.h"
-#import "lang.h"
+#import "handbrake/handbrake.h"
+#import "handbrake/lang.h"
 
 @interface HBAudioDefaults ()
 
@@ -430,7 +430,7 @@
         copy->_container = _container;
         copy->_secondaryEncoderMode = _secondaryEncoderMode;
     }
-    
+
     return copy;
 }
 
@@ -469,9 +469,13 @@
     self = [super init];
 
     decodeInteger(_trackSelectionBehavior);
-    decodeObjectOrFail(_trackSelectionLanguages, NSMutableArray);
+    if (_trackSelectionBehavior < HBAudioTrackSelectionBehaviorNone || _trackSelectionBehavior > HBAudioTrackSelectionBehaviorAll)
+    {
+        goto fail;
+    }
 
-    decodeCollectionOfObjects(_tracksArray, NSMutableArray, HBAudioTrackPreset);
+    decodeCollectionOfObjectsOrFail(_trackSelectionLanguages, NSMutableArray, NSString);
+    decodeCollectionOfObjectsOrFail(_tracksArray, NSMutableArray, HBAudioTrackPreset);
 
     decodeBool(_allowAACPassthru);
     decodeBool(_allowAC3Passthru);
@@ -482,8 +486,8 @@
     decodeBool(_allowTrueHDPassthru);
     decodeBool(_allowFLACPassthru);
 
-    decodeInt(_encoderFallback);
-    decodeInt(_container);
+    decodeInt(_encoderFallback); if (_encoderFallback < 0) { goto fail; }
+    decodeInt(_container); if (_container != HB_MUX_MP4 && _container != HB_MUX_MKV && _container != HB_MUX_WEBM) { goto fail; }
     decodeBool(_secondaryEncoderMode);
 
     return self;
@@ -504,7 +508,7 @@ fail:
     return self.tracksArray[index];
 }
 
-- (void)insertObject:(HBAudioTrackPreset *)track inTracksArrayAtIndex:(NSUInteger)index;
+- (void)insertObject:(HBAudioTrackPreset *)track inTracksArrayAtIndex:(NSUInteger)index
 {
     [[self.undo prepareWithInvocationTarget:self] removeObjectFromTracksArrayAtIndex:index];
     [self.tracksArray insertObject:track atIndex:index];

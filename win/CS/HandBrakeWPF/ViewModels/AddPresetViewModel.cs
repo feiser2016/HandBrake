@@ -27,6 +27,7 @@ namespace HandBrakeWPF.ViewModels
     using HandBrakeWPF.Services.Scan.Model;
     using HandBrakeWPF.Utilities;
     using HandBrakeWPF.ViewModels.Interfaces;
+    using HandBrakeWPF.Views;
 
     using EncodeTask = HandBrakeWPF.Services.Encode.Model.EncodeTask;
     using PresetPictureSettingsMode = HandBrakeWPF.Model.Picture.PresetPictureSettingsMode;
@@ -47,7 +48,7 @@ namespace HandBrakeWPF.ViewModels
         private ISubtitlesDefaultsViewModel subtitlesDefaultsViewModel;
 
         private PresetDisplayCategory selectedPresetCategory;
-        private readonly PresetDisplayCategory addNewCategory = new PresetDisplayCategory(ResourcesUI.AddPresetView_AddNewCategory, true, null);
+        private readonly PresetDisplayCategory addNewCategory = new PresetDisplayCategory(Resources.AddPresetView_AddNewCategory, true, null);
         private bool canAddNewPresetCategory;
 
         /// <summary>
@@ -67,7 +68,7 @@ namespace HandBrakeWPF.ViewModels
             this.presetService = presetService;
             this.errorService = errorService;
             this.windowManager = windowManager;
-            this.Title = ResourcesUI.AddPresetView_AddPreset;
+            this.Title = Resources.AddPresetView_AddPreset;
             this.Preset = new Preset { IsBuildIn = false, IsDefault = false, Category = PresetService.UserPresetCatgoryName };
             this.PictureSettingsModes = EnumHelper<PresetPictureSettingsMode>.GetEnumList();
             this.PresetCategories = presetService.GetPresetCategories(true).Union(new List<PresetDisplayCategory> { addNewCategory }).ToList();
@@ -306,14 +307,11 @@ namespace HandBrakeWPF.ViewModels
         /// </summary>
         public void EditAudioDefaults()
         {
-            IPopupWindowViewModel popup = new PopupWindowViewModel(this.audioDefaultsViewModel, ResourcesUI.Preset_AudioDefaults_Title, ResourcesUI.Preset_AudioDefaults_SubText);
-            if (this.windowManager.ShowDialog(popup) == true)
+            this.audioDefaultsViewModel.ResetApplied();
+            bool? result = this.windowManager.ShowDialog(this.audioDefaultsViewModel);
+            if (audioDefaultsViewModel.IsApplied)
             {
                 this.Preset.AudioTrackBehaviours = this.audioDefaultsViewModel.AudioBehaviours.Clone();
-            }
-            else
-            {
-                // Handle other case(s)
             }
         }
 
@@ -322,16 +320,15 @@ namespace HandBrakeWPF.ViewModels
         /// </summary>
         public void EditSubtitleDefaults()
         {
-            IPopupWindowViewModel popup = new PopupWindowViewModel(this.subtitlesDefaultsViewModel, ResourcesUI.Preset_SubtitleDefaults_Title, ResourcesUI.Preset_SubtitleDefaults_SubText);
-            
-            if (this.windowManager.ShowDialog(popup) == true)
+            this.subtitlesDefaultsViewModel.ResetApplied();
+            SubtitlesDefaultsView view = new SubtitlesDefaultsView();
+            view.DataContext = this.subtitlesDefaultsViewModel;
+            view.ShowDialog();
+
+            if (subtitlesDefaultsViewModel.IsApplied)
             {
                 this.Preset.SubtitleTrackBehaviours = this.subtitlesDefaultsViewModel.SubtitleBehaviours.Clone();
             }
-            else
-            {
-                // Handle other case(s)
-            }     
         }
 
         /// <summary>

@@ -1,5 +1,5 @@
 /*  HBPresetsManager.h $
- 
+
  This file is part of the HandBrake source code.
  Homepage: <http://handbrake.fr/>.
  It may be used under the terms of the GNU General Public License. */
@@ -58,6 +58,8 @@ extern NSString *HBPresetsChangedNotification;
  *  @param idx the NSIndexPath of the preset to delete.
  */
 - (void)deletePresetAtIndexPath:(NSIndexPath *)idx;
+
+- (void)replacePresetAtIndexPath:(NSIndexPath *)idx withPreset:(HBPreset *)preset;
 
 /**
  *  Returns the index path of the specified object.

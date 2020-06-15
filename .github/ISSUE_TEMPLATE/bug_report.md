@@ -1,33 +1,29 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-
+about: Create a report to help us improve. On the next screen, please fill in the template provided in the post description.
 ---
 
-### Description of the problem
+### Problem description:
 
-Description here.
+Please replace this text with a description of the problem. Include any steps necessary to reproduce the problem.
 
-### Steps to reproduce the problem
+### HandBrake version (e.g., 1.3.0):
 
-Steps here.
+Please replace this text with the version of HandBrake you are running.
 
-### HandBrake version (e.g., 1.0.0)
+### Operating system and version (e.g., Ubuntu 19.10, macOS 10.15 Catalina, Windows 10 1909):
 
-HandBrake version here.
+Please replace this text with the version of the operation system you are running.
 
-### Operating system and version (e.g., Ubuntu 16.04 LTS, macOS 10.3 High Sierra, Windows 10 Creators Update)
+### Error message text and/or screenshot:
 
-OS and version here.
+Please provide any error messages or screenshots that may help.
 
-### Error message text or screenshot
+### HandBrake Activity Log:
 
-Type or paste text and/or drag and drop image.
-
-### HandBrake Activity Log ***required*** (see https://handbrake.fr/docs/en/latest/help/activity-log.html)
-
-Drag and drop file or...
+An Activity Log is required for support. Please read https://handbrake.fr/docs/en/latest/help/activity-log.html for more information.
 
 ~~~
-Paste log text between these markers.
+Please replace this text with the Activity Log, or upload the log file to Github by dragging and dropping the file on this post.
+Leave the ~ marks above and below.
 ~~~

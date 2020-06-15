@@ -1,13 +1,12 @@
 /*
  * hb-backend.h
- * Copyright (C) John Stebbins 2008-2018 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2020 <stebbins@stebbins>
  *
  * hb-backend.h is free software.
  *
  * You may redistribute it and/or modify it under the terms of the
- * GNU General Public License, as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option)
- * any later version.
+ * GNU General Public License version 2, as published by the Free Software
+ * Foundation.
  *
  * hb-backend.h is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -26,8 +25,8 @@
 
 #include "values.h"
 #include "settings.h"
-#include "hb.h"
-#include "lang.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/lang.h"
 
 enum
 {
@@ -47,17 +46,19 @@ typedef struct
     gint preview_cur;
 
     // WORKING
-    gint unique_id;
-    gint pass_id;
-    gint pass;
-    gint pass_count;
+    gint    unique_id;
+    gint    pass_id;
+    gint    pass;
+    gint    pass_count;
     gdouble progress;
     gdouble rate_cur;
     gdouble rate_avg;
-    gint hours;
-    gint minutes;
-    gint seconds;
-    gint error;
+    gint64  eta_seconds;
+    gint    hours;
+    gint    minutes;
+    gint    seconds;
+    gint64  paused;
+    gint    error;
 } ghb_instance_status_t;
 
 typedef struct
@@ -129,9 +130,9 @@ void ghb_set_scale_settings(GhbValue *settings, gint mode);
 void ghb_picture_settings_deps(signal_user_data_t *ud);
 gint64 ghb_get_chapter_duration(const hb_title_t *title, gint chap);
 gint64 ghb_get_chapter_start(const hb_title_t *title, gint chap);
-void ghb_part_duration(
-    const hb_title_t *title, gint sc, gint ec, gint *hh, gint *mm, gint *ss);
-gint ghb_get_best_mix(hb_audio_config_t *aconfig, gint acodec, gint mix);
+gint64 ghb_chapter_range_get_duration(const hb_title_t *title,
+                                      gint sc, gint ec);
+gint ghb_get_best_mix(uint64_t layout, gint acodec, gint mix);
 gboolean ghb_audio_is_passthru(gint acodec);
 gboolean ghb_audio_can_passthru(gint acodec);
 gint ghb_get_default_acodec(void);
@@ -145,7 +146,6 @@ void ghb_add_all_subtitles(signal_user_data_t *ud, gint titleindex);
 gint ghb_find_subtitle_track(const hb_title_t * title, const gchar * lang, int start);
 gint ghb_pick_subtitle_track(signal_user_data_t *ud);
 gint ghb_longest_title(void);
-const gchar* ghb_build_advanced_opts_string(GhbValue *settings);
 GdkPixbuf* ghb_get_preview_image(
     const hb_title_t *title, gint index, signal_user_data_t *ud,
     gint *out_width, gint *out_height);

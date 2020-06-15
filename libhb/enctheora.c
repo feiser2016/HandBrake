@@ -1,13 +1,13 @@
 /* enctheora.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 #include "theora/codec.h"
 #include "theora/theoraenc.h"
 
@@ -236,7 +236,7 @@ int enctheoraWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
             unsigned char *buffer;
             int bytes;
 
-            bytes = th_encode_ctl(pv->ctx, TH_ENCCTL_2PASS_OUT, 
+            bytes = th_encode_ctl(pv->ctx, TH_ENCCTL_2PASS_OUT,
                                   &buffer, sizeof(buffer));
             if( bytes < 0 )
             {
@@ -292,7 +292,7 @@ int enctheoraWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
             /*And pass them off.*/
             if( bytes > pv->stat_fill - pv->stat_read )
                 bytes = pv->stat_fill - pv->stat_read;
-            ret = th_encode_ctl( pv->ctx, TH_ENCCTL_2PASS_IN, 
+            ret = th_encode_ctl( pv->ctx, TH_ENCCTL_2PASS_IN,
                                  pv->stat_buf+pv->stat_read, bytes);
             if( ret < 0 )
             {
@@ -305,7 +305,7 @@ int enctheoraWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
             if( ret >= pv->stat_fill - pv->stat_read )
                 pv->stat_read = pv->stat_fill = 0;
             /*Otherwise remember how much it used.*/
-            else 
+            else
                 pv->stat_read += ret;
         }
     }
@@ -338,7 +338,7 @@ int enctheoraWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
         unsigned char *buffer;
         int bytes;
 
-        bytes = th_encode_ctl(pv->ctx, TH_ENCCTL_2PASS_OUT, 
+        bytes = th_encode_ctl(pv->ctx, TH_ENCCTL_2PASS_OUT,
                               &buffer, sizeof(buffer));
         if( bytes < 0 )
         {

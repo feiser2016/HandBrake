@@ -9,9 +9,15 @@
 
 namespace HandBrakeWPF.Helpers
 {
+    using Caliburn.Micro;
+
     using HandBrake.Interop.Interop.HbLib;
+    using HandBrake.Interop.Interop.HbLib.Wrappers.Interfaces;
     using HandBrake.Interop.Interop.Model;
     using HandBrake.Interop.Interop.Model.Encoding;
+    using HandBrake.Interop.Interop.Providers.Interfaces;
+
+    using HandBrakeWPF.Services.Interfaces;
 
     /// <summary>
     /// The picture size Helpers
@@ -175,6 +181,21 @@ namespace HandBrakeWPF.Helpers
         {
             int settingMode = (int)setting + (job.KeepDisplayAspect ? 0x04 : 0);
 
+
+            hb_rational_t computed_par = new hb_rational_t();
+            switch (job.AnamorphicMode)
+            {
+                case Anamorphic.None:
+                    computed_par = new hb_rational_t { den = 1, num = 1 };
+                    break;
+                case Anamorphic.Custom:
+                    computed_par = new hb_rational_t { den = job.ParH, num = job.ParW };
+                    break;
+                default:
+                    computed_par = new hb_rational_t { den = title.ParH, num = title.ParW };
+                    break;
+            }
+
             hb_geometry_settings_s uiGeometry = new hb_geometry_settings_s
             {
                 crop = new[] { job.Crop.Top, job.Crop.Bottom, job.Crop.Left, job.Crop.Right },
@@ -184,7 +205,7 @@ namespace HandBrakeWPF.Helpers
                 maxHeight = job.MaxHeight,
                 mode = (int)job.AnamorphicMode,
                 modulus = job.Modulus.HasValue ? job.Modulus.Value : 16,
-                geometry = new hb_geometry_s { height = job.Height, width = job.Width, par = job.AnamorphicMode != Anamorphic.Custom ? new hb_rational_t { den = title.ParH, num = title.ParW } : new hb_rational_t { den = job.ParH, num = job.ParW } }
+                geometry = new hb_geometry_s { height = job.Height, width = job.Width, par = computed_par }
             };
 
             hb_geometry_s sourceGeometry = new hb_geometry_s
@@ -196,7 +217,10 @@ namespace HandBrakeWPF.Helpers
 
             hb_geometry_s result = new hb_geometry_s();
 
-            HBFunctions.hb_set_anamorphic_size2(ref sourceGeometry, ref uiGeometry, ref result);
+            IHbFunctionsProvider provider = IoC.Get<IHbFunctionsProvider>(); // TODO make this method non static and remove IoC call.
+            IHbFunctions hbFunctions = provider.GetHbFunctionsWrapper();
+
+            hbFunctions.hb_set_anamorphic_size2(ref sourceGeometry, ref uiGeometry, ref result);
 
             int outputWidth = result.width;
             int outputHeight = result.height;

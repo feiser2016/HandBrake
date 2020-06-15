@@ -1,6 +1,6 @@
 /* decssasub.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -23,243 +23,264 @@
  *
  * @author David Foster (davidfstr)
  */
-#include <stdlib.h>
-#include <stdio.h>
-#include <ctype.h>
-#include "hb.h"
 
-#include <ass/ass.h>
-#include "decssasub.h"
-#include "colormap.h"
+#include "handbrake/handbrake.h"
+#include "handbrake/decavsub.h"
+#include "libavformat/avformat.h"
 
 struct hb_work_private_s
 {
-    // If decoding to PICTURESUB format:
-    int readOrder;
+    AVFormatContext    * ic;
+    hb_avsub_context_t * ctx;
+    AVPacket             avpkt;
+    hb_job_t           * job;
+    hb_subtitle_t      * subtitle;
 
-    hb_job_t *job;
+    // Time of first desired subtitle adjusted by reader_pts_offset
+    uint64_t start_time;
+    uint64_t stop_time;
 };
 
-#define SSA_VERBOSE_PACKETS 0
-
-static int ssa_update_style(char *ssa, hb_subtitle_style_t *style)
+static int extradataInit( hb_work_private_t * pv )
 {
-    int pos, end, index;
-
-    if (ssa[0] != '{')
-        return 0;
-
-    pos = 1;
-    while (ssa[pos] != '}' && ssa[pos] != '\0')
+    if (pv->ic->nb_streams < 1)
     {
-        index = -1;
-
-        // Skip any malformed markup junk
-        while (strchr("\\}", ssa[pos]) == NULL) pos++;
-        pos++;
-        // Check for an index that is in some markup (e.g. font color)
-        if (isdigit(ssa[pos]))
-        {
-            index = ssa[pos++] - 0x30;
-        }
-        // Find the end of this markup clause
-        end = pos;
-        while (strchr("\\}", ssa[end]) == NULL) end++;
-        // Handle simple integer valued attributes
-        if (strchr("ibu", ssa[pos]) != NULL && isdigit(ssa[pos+1]))
-        {
-            int val = strtol(ssa + pos + 1, NULL, 0);
-            switch (ssa[pos])
-            {
-                case 'i':
-                    style->flags = (style->flags & ~HB_STYLE_FLAG_ITALIC) |
-                                   !!val * HB_STYLE_FLAG_ITALIC;
-                    break;
-                case 'b':
-                    style->flags = (style->flags & ~HB_STYLE_FLAG_BOLD) |
-                                   !!val * HB_STYLE_FLAG_BOLD;
-                    break;
-                case 'u':
-                    style->flags = (style->flags & ~HB_STYLE_FLAG_UNDERLINE) |
-                                   !!val * HB_STYLE_FLAG_UNDERLINE;
-                    break;
-            }
-        }
-        if (ssa[pos] == 'c' && ssa[pos+1] == '&' && ssa[pos+2] == 'H')
-        {
-            // Font color markup
-            char *endptr;
-            uint32_t bgr;
-
-            bgr = strtol(ssa + pos + 3, &endptr, 16);
-            if (*endptr == '&')
-            {
-                switch (index)
-                {
-                    case -1:
-                    case 1:
-                        style->fg_rgb = HB_BGR_TO_RGB(bgr);
-                        break;
-                    case 2:
-                        style->alt_rgb = HB_BGR_TO_RGB(bgr);
-                        break;
-                    case 3:
-                        style->ol_rgb = HB_BGR_TO_RGB(bgr);
-                        break;
-                    case 4:
-                        style->bg_rgb = HB_BGR_TO_RGB(bgr);
-                        break;
-                    default:
-                        // Unknown color index, ignore
-                        break;
-                }
-            }
-        }
-        if ((ssa[pos] == 'a' && ssa[pos+1] == '&' && ssa[pos+2] == 'H') ||
-            (!strcmp(ssa+pos, "alpha") && ssa[pos+5] == '&' && ssa[pos+6] == 'H'))
-        {
-            // Font alpha markup
-            char *endptr;
-            uint8_t alpha;
-            int alpha_pos = 3;
-
-            if (ssa[1] == 'l')
-                alpha_pos = 7;
-
-            alpha = strtol(ssa + pos + alpha_pos, &endptr, 16);
-            if (*endptr == '&')
-            {
-                // SSA alpha is inverted 0 is opaque
-                alpha = 255 - alpha;
-                switch (index)
-                {
-                    case -1:
-                    case 1:
-                        style->fg_alpha = alpha;
-                        break;
-                    case 2:
-                        style->alt_alpha = alpha;
-                        break;
-                    case 3:
-                        style->ol_alpha = alpha;
-                        break;
-                    case 4:
-                        style->bg_alpha = alpha;
-                        break;
-                    default:
-                        // Unknown alpha index, ignore
-                        break;
-                }
-            }
-        }
-        pos = end;
+        hb_error("SSA demux found no streams");
+        return 1;
     }
-    if (ssa[pos] == '}')
-        pos++;
-    return pos;
-}
 
-char * hb_ssa_to_text(char *in, int *consumed, hb_subtitle_style_t *style)
-{
-    int markup_len = 0;
-    int in_pos = 0;
-    int out_pos = 0;
-    char *out = malloc(strlen(in) + 1); // out will never be longer than in
-
-    for (in_pos = 0; in[in_pos] != '\0'; in_pos++)
+    AVStream * st = pv->ic->streams[0];
+    if (st->codecpar->codec_id != AV_CODEC_ID_ASS)
     {
-        if ((markup_len = ssa_update_style(in + in_pos, style)))
-        {
-            *consumed = in_pos + markup_len;
-            out[out_pos++] = '\0';
-            return out;
-        }
-        // Check escape codes
-        if (in[in_pos] == '\\')
-        {
-            in_pos++;
-            switch (in[in_pos])
-            {
-                case '\0':
-                    in_pos--;
-                    break;
-                case 'N':
-                case 'n':
-                    out[out_pos++] = '\n';
-                    break;
-                case 'h':
-                    out[out_pos++] = ' ';
-                    break;
-                default:
-                    out[out_pos++] = in[in_pos];
-                    break;
-            }
-        }
-        else
-        {
-            out[out_pos++] = in[in_pos];
-        }
+        hb_error("SSA demux found wrong codec_id %x", st->codecpar->codec_id);
+        return 1;
     }
-    *consumed = in_pos;
-    out[out_pos++] = '\0';
-    return out;
-}
-
-void hb_ssa_style_init(hb_subtitle_style_t *style)
-{
-    style->flags = 0;
-
-    style->fg_rgb    = 0x00FFFFFF;
-    style->alt_rgb   = 0x00FFFFFF;
-    style->ol_rgb    = 0x000F0F0F;
-    style->bg_rgb    = 0x000F0F0F;
-
-    style->fg_alpha  = 0xFF;
-    style->alt_alpha = 0xFF;
-    style->ol_alpha  = 0xFF;
-    style->bg_alpha  = 0xFF;
+    if (st->codecpar->extradata != NULL)
+    {
+        pv->subtitle->extradata = malloc(st->codecpar->extradata_size + 1);
+        memcpy(pv->subtitle->extradata,
+               st->codecpar->extradata, st->codecpar->extradata_size);
+        pv->subtitle->extradata[st->codecpar->extradata_size] = 0;
+        pv->subtitle->extradata_size = st->codecpar->extradata_size + 1;
+    }
+    return 0;
 }
 
 static int decssaInit( hb_work_object_t * w, hb_job_t * job )
 {
     hb_work_private_t * pv;
+    int                 ii;
 
-    pv              = calloc( 1, sizeof( hb_work_private_t ) );
+    if (w->subtitle->config.src_filename == NULL)
+    {
+        hb_error("No SSA subtitle file specified");
+        goto fail;
+    }
+
+    pv = calloc( 1, sizeof( hb_work_private_t ) );
+    if (pv == NULL)
+    {
+        goto fail;
+    }
     w->private_data = pv;
-    pv->job = job;
+    pv->job         = job;
+    pv->subtitle    = w->subtitle;
+    av_init_packet(&pv->avpkt);
+    if (avformat_open_input(&pv->ic, pv->subtitle->config.src_filename,
+        NULL, NULL ) < 0 )
+    {
+        hb_error("Could not open the SSA subtitle file '%s'\n",
+                 pv->subtitle->config.src_filename);
+        goto fail;
+    }
+    pv->ctx = decavsubInit(w, job);
+    if (pv->ctx == NULL)
+    {
+        goto fail;
+    }
+
+    if (extradataInit(pv))
+    {
+        goto fail;
+    }
+
+    /*
+     * Figure out the start and stop times from the chapters being
+     * encoded - drop subtitle not in this range.
+     */
+    pv->start_time = 0;
+    for (ii = 1; ii < job->chapter_start; ++ii)
+    {
+        hb_chapter_t * chapter = hb_list_item(job->list_chapter, ii - 1);
+        if (chapter)
+        {
+            pv->start_time += chapter->duration;
+        } else {
+            hb_error("Could not locate chapter %d for SSA start time", ii);
+        }
+    }
+    pv->stop_time = pv->start_time;
+    for (ii = job->chapter_start; ii <= job->chapter_end; ++ii)
+    {
+        hb_chapter_t * chapter = hb_list_item(job->list_chapter, ii - 1);
+        if (chapter)
+        {
+            pv->stop_time += chapter->duration;
+        } else {
+            hb_error("Could not locate chapter %d for SSA start time", ii);
+        }
+    }
+
+    hb_deep_log(3, "SSA Start time %"PRId64", stop time %"PRId64,
+                pv->start_time, pv->stop_time);
+
+    if (job->pts_to_start != 0)
+    {
+        // Compute start_time after reader sets reader_pts_offset
+        pv->start_time = AV_NOPTS_VALUE;
+    }
 
     return 0;
+
+fail:
+    if (pv != NULL)
+    {
+        av_packet_unref(&pv->avpkt);
+        decavsubClose(pv->ctx);
+        if (pv->ic)
+        {
+            avformat_close_input(&pv->ic);
+        }
+        free(pv);
+        w->private_data = NULL;
+    }
+    return 1;
+}
+
+static hb_buffer_t * ssa_read( hb_work_private_t * pv )
+{
+    int           err;
+    hb_buffer_t * out;
+
+    if (pv->job->reader_pts_offset == AV_NOPTS_VALUE)
+    {
+        // We need to wait for reader to initialize it's pts offset so that
+        // we know where to start reading SSA.
+        return NULL;
+    }
+    if (pv->start_time == AV_NOPTS_VALUE)
+    {
+        pv->start_time = pv->job->reader_pts_offset;
+        if (pv->job->pts_to_stop > 0)
+        {
+            pv->stop_time = pv->job->pts_to_start + pv->job->pts_to_stop;
+        }
+    }
+
+    if ((err = av_read_frame(pv->ic, &pv->avpkt)) < 0)
+    {
+        if (err != AVERROR_EOF)
+        {
+            hb_error("SSA demux read error %d", err);
+        }
+        return hb_buffer_eof_init();
+    }
+    AVStream * st = pv->ic->streams[pv->avpkt.stream_index];
+
+    out = hb_buffer_init(pv->avpkt.size + 1);
+    memcpy(out->data, pv->avpkt.data, pv->avpkt.size);
+    out->data[pv->avpkt.size] = 0;
+    out->size = pv->avpkt.size;
+
+    double tsconv = (double)90000. * st->time_base.num / st->time_base.den;
+    if (pv->avpkt.pts != AV_NOPTS_VALUE)
+    {
+        out->s.start = pv->avpkt.pts * tsconv +
+                       pv->subtitle->config.offset * 90;
+    }
+    if (pv->avpkt.dts != AV_NOPTS_VALUE)
+    {
+        out->s.renderOffset = pv->avpkt.dts * tsconv +
+                              pv->subtitle->config.offset * 90;
+    }
+    if (out->s.renderOffset >= 0 && out->s.start == AV_NOPTS_VALUE)
+    {
+        out->s.start = out->s.renderOffset;
+    }
+    else if (out->s.renderOffset == AV_NOPTS_VALUE && out->s.start >= 0)
+    {
+        out->s.renderOffset = out->s.start;
+    }
+    int64_t pkt_duration = pv->avpkt.duration;
+    if (pkt_duration != AV_NOPTS_VALUE)
+    {
+        out->s.duration = pkt_duration * tsconv;
+        out->s.stop = out->s.start + out->s.duration;
+    }
+    else
+    {
+        out->s.duration = (int64_t)AV_NOPTS_VALUE;
+    }
+    out->s.type = SUBTITLE_BUF;
+    av_packet_unref(&pv->avpkt);
+
+    if (out->s.stop  <= pv->start_time || out->s.start >= pv->stop_time)
+    {
+        // Drop subtitles that end before the PtoP start time
+        // or start after the PtoP stop time
+        hb_deep_log(3, "Discarding SSA at time start %"PRId64", stop %"PRId64,
+                    out->s.start, out->s.stop);
+        hb_buffer_close(&out);
+    }
+    else
+    {
+        // Adjust start/stop for subtitles that span PtoP start/stop
+        if (out->s.start < pv->start_time)
+        {
+            out->s.start = pv->start_time;
+        }
+        if (out->s.stop > pv->stop_time)
+        {
+            out->s.stop = pv->stop_time;
+        }
+        out->s.start -= pv->start_time;
+        out->s.stop  -= pv->start_time;
+    }
+    return out;
 }
 
 static int decssaWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
                         hb_buffer_t ** buf_out )
 {
-    hb_buffer_t * in = *buf_in;
+    hb_work_private_t * pv =  w->private_data;
+    hb_buffer_t       * in;
+    int                 result;
 
-#if SSA_VERBOSE_PACKETS
-    printf("\nPACKET(%"PRId64",%"PRId64"): %.*s\n", in->s.start/90, in->s.stop/90, in->size, in->data);
-#endif
-
-    *buf_in = NULL;
-    *buf_out = in;
-    if (in->s.flags & HB_BUF_FLAG_EOF)
+    in = ssa_read(pv);
+    if (in == NULL)
     {
-        return HB_WORK_DONE;
+        return HB_WORK_OK;
     }
 
-    // Not much to do here.  ffmpeg already supplies SSA subtitles in the
-    // requried matroska packet format.
-    //
-    // We require string termination of the buffer
-    hb_buffer_realloc(in, ++in->size);
-    in->data[in->size - 1] = '\0';
-
-    return HB_WORK_OK;
+    result = decavsubWork(pv->ctx, &in, buf_out);
+    if (in != NULL)
+    {
+        hb_buffer_close(&in);
+    }
+    return result;
 }
 
 static void decssaClose( hb_work_object_t * w )
 {
-    free( w->private_data );
+    hb_work_private_t * pv = w->private_data;
+    if (pv != NULL)
+    {
+        decavsubClose(pv->ctx);
+        av_packet_unref(&pv->avpkt);
+        avformat_close_input(&pv->ic);
+        free(pv);
+    }
+    w->private_data = NULL;
 }
 
 hb_work_object_t hb_decssasub =

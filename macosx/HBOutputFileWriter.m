@@ -13,7 +13,7 @@
     NSDateFormatter *_formatter;
 }
 
-- (nullable instancetype)initWithFileURL:(NSURL *)url;
+- (nullable instancetype)initWithFileURL:(NSURL *)url
 {
     self = [super init];
     if (self)
@@ -26,7 +26,7 @@
                                                                  error:&error];
         if (!result)
         {
-            [HBUtilities writeToActivityLog:"Error: coudln't open activity log file, %@", error];
+            [HBUtilities writeToActivityLog:"Error: couldn't open activity log file, %@", error];
             return nil;
         }
 
@@ -74,12 +74,7 @@
     fflush(f);
 }
 
-- (void)stdoutRedirect:(NSString *)text
-{
-    [self write:text];
-}
-
-- (void)stderrRedirect:(NSString *)text
+- (void)redirect:(NSString *)text type:(HBRedirectType)type
 {
     [self write:text];
 }

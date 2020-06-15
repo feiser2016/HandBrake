@@ -1,9 +1,8 @@
-//
-//  HBPreviewViewController.m
-//  HandBrake
-//
-//  Created by Damiano Galassi on 14/12/2017.
-//
+/*  HBPreviewViewController.m
+
+This file is part of the HandBrake source code.
+Homepage: <http://handbrake.fr/>.
+It may be used under the terms of the GNU General Public License. */
 
 #import <QuartzCore/QuartzCore.h>
 #import "HBPreviewViewController.h"
@@ -70,12 +69,8 @@
     if (generator)
     {
         self.selectedIndex = self.selectedIndex;
-        [self updatePicture];
     }
-    else
-    {
-        self.previewView.image = nil;
-    }
+    [self updatePicture];
 }
 
 - (void)update
@@ -83,7 +78,7 @@
     [self updatePicture];
 }
 
-#pragma MARK: - HUD
+#pragma mark - HUD
 
 - (void)mouseEntered:(NSEvent *)theEvent
 {
@@ -154,7 +149,7 @@
     }
 }
 
-#pragma MARK: - Preview index
+#pragma mark - Preview index
 
 - (void)setSelectedIndex:(NSInteger)selectedIndex
 {
@@ -189,6 +184,14 @@
         CGImageRef fPreviewImage = [self.generator copyImageAtIndex:self.selectedIndex shouldCache:YES];
         self.previewView.image = fPreviewImage;
         CFRelease(fPreviewImage);
+        self.previewView.layer.opacity = 1;
+    }
+    else
+    {
+        NSImage *bars = [NSImage imageNamed:@"ColorBars"];
+        CGImageRef image = [bars CGImageForProposedRect:NULL context:nil hints:nil];
+        self.previewView.image = image;
+        self.previewView.layer.opacity = .3;
     }
 }
 

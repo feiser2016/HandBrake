@@ -52,7 +52,7 @@ namespace HandBrakeWPF.Views
             {
                 INotifyIconService notifyIconService = IoC.Get<INotifyIconService>();
                 this.notifyIcon = new NotifyIcon();
-                this.notifyIcon.ContextMenu = new ContextMenu(new[] { new MenuItem("Restore", NotifyIconClick), new MenuItem("Mini Status Display", ShowMiniStatusDisplay) });
+                this.notifyIcon.ContextMenu = new ContextMenu(new[] { new MenuItem("Restore", NotifyIconClick) });
                 notifyIconService.RegisterNotifyIcon(this.notifyIcon);
 
                 StreamResourceInfo streamResourceInfo = Application.GetResourceStream(new Uri("pack://application:,,,/handbrakepineapple.ico"));
@@ -61,7 +61,8 @@ namespace HandBrakeWPF.Views
                     Stream iconStream = streamResourceInfo.Stream;
                     this.notifyIcon.Icon = new Icon(iconStream);
                 }
-                this.notifyIcon.DoubleClick += this.NotifyIconClick;
+
+                this.notifyIcon.Click += this.NotifyIconClick;
                 this.StateChanged += this.ShellViewStateChanged;
             }
 
@@ -70,8 +71,11 @@ namespace HandBrakeWPF.Views
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.L, ModifierKeys.Control)), new KeyGesture(Key.L, ModifierKeys.Control))); // Open Log Window
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.Q, ModifierKeys.Control)), new KeyGesture(Key.Q, ModifierKeys.Control))); // Open Queue Window
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.A, ModifierKeys.Control)), new KeyGesture(Key.A, ModifierKeys.Control))); // Add to Queue
+            this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.A, ModifierKeys.Alt)), new KeyGesture(Key.A, ModifierKeys.Alt))); // Add all to Queue
+            this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.A, ModifierKeys.Control | ModifierKeys.Shift)), new KeyGesture(Key.A, ModifierKeys.Control | ModifierKeys.Shift))); // Add selection to Queue
+
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.O, ModifierKeys.Control)), new KeyGesture(Key.O, ModifierKeys.Control))); // File Scan
-            this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.O, ModifierKeys.Alt)), new KeyGesture(Key.O, ModifierKeys.Alt)));     // Scan Window
+            this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.O, ModifierKeys.Alt)), new KeyGesture(Key.O, ModifierKeys.Alt))); // Scan Window
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.O, ModifierKeys.Control | ModifierKeys.Shift)), new KeyGesture(Key.O, ModifierKeys.Control | ModifierKeys.Shift))); // Scan a Folder
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.G, ModifierKeys.Control | ModifierKeys.Shift)), new KeyGesture(Key.G, ModifierKeys.Control | ModifierKeys.Shift))); // Garbage Colleciton
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.F1, ModifierKeys.None)), new KeyGesture(Key.F1, ModifierKeys.None))); // Help
@@ -85,7 +89,6 @@ namespace HandBrakeWPF.Views
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.D5, ModifierKeys.Control)), new KeyGesture(Key.D5, ModifierKeys.Control)));
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.D6, ModifierKeys.Control)), new KeyGesture(Key.D6, ModifierKeys.Control)));
             this.InputBindings.Add(new InputBinding(new ProcessShortcutCommand(new KeyGesture(Key.D7, ModifierKeys.Control)), new KeyGesture(Key.D7, ModifierKeys.Control)));
-
 
             // Enable Windows 7 Taskbar progress indication.
             if (this.TaskbarItemInfo == null)
@@ -122,27 +125,6 @@ namespace HandBrakeWPF.Views
         }
 
         /// <summary>
-        /// The show mini status display.
-        /// </summary>
-        /// <param name="sender">
-        /// The sender.
-        /// </param>
-        /// <param name="e">
-        /// The e.
-        /// </param>
-        private void ShowMiniStatusDisplay(object sender, EventArgs e)
-        {
-            IMiniViewModel titleSpecificView = IoC.Get<IMiniViewModel>();
-            IWindowManager windowManager = IoC.Get<IWindowManager>();
-            Execute.OnUIThread(
-                () =>
-                {
-                    titleSpecificView.Activate();
-                    windowManager.ShowWindow(titleSpecificView);
-                });
-        }
-
-        /// <summary>
         /// The notify icon_ click.
         /// </summary>
         /// <param name="sender">
@@ -154,6 +136,10 @@ namespace HandBrakeWPF.Views
         private void NotifyIconClick(object sender, EventArgs e)
         {
             this.WindowState = WindowState.Normal;
+
+            // Bit of a hack but does work
+            this.Topmost = true; 
+            this.Topmost = false;
         }
 
         /// <summary>

@@ -75,7 +75,19 @@ namespace HandBrakeWPF.Commands
                 // Add to Queue (Ctrl+A)
                 if (gesture.Modifiers == ModifierKeys.Control && gesture.Key == Key.A)
                 {
-                    mainViewModel.AddToQueue();
+                    mainViewModel.AddToQueueWithErrorHandling();
+                }
+
+                // Add all to Queue (Alt+A)
+                if (gesture.Modifiers == ModifierKeys.Alt && gesture.Key == Key.A)
+                {
+                    mainViewModel.AddAllToQueue();
+                }
+
+                // Add selection to Queue (Control+Shift+A)
+                if (gesture.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && gesture.Key == Key.A)
+                {
+                    mainViewModel.AddSelectionToQueue();
                 }
 
                 // Scan a File (Alt+O)
@@ -167,6 +179,6 @@ namespace HandBrakeWPF.Commands
         /// <summary>
         /// Can Execute Changed
         /// </summary>
-        public event EventHandler CanExecuteChanged;
+        public event EventHandler CanExecuteChanged { add { } remove { } }
     }
 }

@@ -108,7 +108,7 @@ namespace HandBrakeWPF.Controls
         /// </summary>
         public NumberBox()
         {
-            this.noneCaption = "(none)";
+            this.noneCaption = string.Empty;
             this.UpdateBindingOnTextChange = true;
             this.ShowIncrementButtons = true;
             this.SelectAllOnClick = true;
@@ -340,7 +340,7 @@ namespace HandBrakeWPF.Controls
         /// </param>
         private void DownButtonMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            this.refireControl.Stop();
+            this.refireControl?.Stop();
         }
 
         /// <summary>
@@ -616,7 +616,7 @@ namespace HandBrakeWPF.Controls
         /// </param>
         private void UpButtonMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            this.refireControl.Stop();
+            this.refireControl?.Stop();
         }
 
         /// <summary>

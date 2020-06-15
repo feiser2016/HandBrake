@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="13771" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="15705" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES">
     <dependencies>
         <deployment identifier="macosx"/>
-        <development version="8000" identifier="xcode"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="13771"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="15705"/>
     </dependencies>
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
@@ -124,12 +123,12 @@
                             </menuItem>
                             <menuItem title="Start Encoding" keyEquivalent="s" id="2444">
                                 <connections>
-                                    <action selector="rip:" target="-1" id="gca-l6-qac"/>
+                                    <action selector="toggleStartCancel:" target="-1" id="l0f-rM-50p"/>
                                 </connections>
                             </menuItem>
                             <menuItem title="Pause Encoding" keyEquivalent="p" id="2494">
                                 <connections>
-                                    <action selector="pause:" target="-1" id="tq4-oz-OV9"/>
+                                    <action selector="togglePauseResume:" target="-1" id="Di1-je-YJZ"/>
                                 </connections>
                             </menuItem>
                         </items>
@@ -272,13 +271,13 @@
                                     <action selector="showTabView:" target="-1" id="qjF-UK-qbp"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Video" tag="2" keyEquivalent="3" id="6rE-SM-AGi">
+                            <menuItem title="Filters" tag="2" keyEquivalent="3" id="6rE-SM-AGi">
                                 <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
                                 <connections>
                                     <action selector="showTabView:" target="-1" id="Ajm-EU-vqU"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Picture" tag="3" keyEquivalent="4" id="Jef-U4-eQT">
+                            <menuItem title="Video" tag="3" keyEquivalent="4" id="Jef-U4-eQT">
                                 <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
                                 <connections>
                                     <action selector="showTabView:" target="-1" id="tzG-5g-Iv2"/>
@@ -332,7 +331,7 @@
                                     <action selector="showAddPresetPanel:" target="-1" id="83j-3C-fCg"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="New Category" tag="-1" keyEquivalent="N" id="wvb-60-cWL">
+                            <menuItem title="New Category…" tag="-1" keyEquivalent="N" id="wvb-60-cWL">
                                 <connections>
                                     <action selector="insertCategory:" target="-1" id="JL7-bI-H97"/>
                                 </connections>
@@ -340,7 +339,17 @@
                             <menuItem isSeparatorItem="YES" tag="-1" id="1954">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
-                            <menuItem title="Make Default Preset" tag="-1" id="frQ-v5-pRa" userLabel="Make Default Preset">
+                            <menuItem title="Save" tag="-1" id="lab-Ly-3p3">
+                                <connections>
+                                    <action selector="savePreset:" target="-1" id="bp1-35-D63"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Rename…" tag="-1" id="1GQ-n3-jfY">
+                                <connections>
+                                    <action selector="showRenamePresetPanel:" target="-1" id="gRr-Jl-kZO"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Make Default" tag="-1" id="frQ-v5-pRa" userLabel="Make Default Preset">
                                 <connections>
                                     <action selector="setDefaultPreset:" target="-1" id="adZ-ic-MKn"/>
                                 </connections>
@@ -348,12 +357,7 @@
                             <menuItem isSeparatorItem="YES" tag="-1" id="2954">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
-                            <menuItem title="Rename Preset…" tag="-1" id="1GQ-n3-jfY">
-                                <connections>
-                                    <action selector="showRenamePresetPanel:" target="-1" id="gRr-Jl-kZO"/>
-                                </connections>
-                            </menuItem>
-                            <menuItem title="Delete Preset" tag="-1" id="CN3-Rh-gVf">
+                            <menuItem title="Delete" tag="-1" id="CN3-Rh-gVf">
                                 <connections>
                                     <action selector="deletePreset:" target="-1" id="ZGV-Ji-MGc"/>
                                 </connections>
@@ -381,7 +385,7 @@
                             <menuItem isSeparatorItem="YES" tag="-1" id="ymY-bE-5EP">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
-                            <menuItem title="Select Default Preset" tag="-1" id="2421">
+                            <menuItem title="Select Default" tag="-1" id="2421">
                                 <connections>
                                     <action selector="selectDefaultPreset:" target="-1" id="2eH-zk-T3n"/>
                                 </connections>
@@ -462,8 +466,9 @@
                     </menu>
                 </menuItem>
             </items>
+            <point key="canvasLocation" x="-169" y="-21"/>
         </menu>
-        <customObject id="4963" customClass="SUUpdater"/>
+        <customObject id="4963" customClass="SPUStandardUpdaterController"/>
         <customObject id="6lr-Yy-GMc" customClass="HBAppDelegate">
             <connections>
                 <outlet property="presetsMenu" destination="1949" id="7YL-mr-2tO"/>

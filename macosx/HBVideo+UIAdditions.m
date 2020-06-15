@@ -6,7 +6,9 @@
 
 #import "HBVideo+UIAdditions.h"
 #import "HBJob+Private.h"
-#include "hb.h"
+#import "HBLocalizationUtilities.h"
+
+#include "handbrake/handbrake.h"
 
 @implementation HBVideo (UIAdditions)
 
@@ -43,7 +45,7 @@
 {
     NSMutableArray *framerates = [NSMutableArray array];
 
-    [framerates addObject:NSLocalizedString(@"Same as source", @"HBVideo -> frame rates display name")];
+    [framerates addObject:HBKitLocalizedString(@"Same as source", @"HBVideo -> frame rates display name")];
 
     for (const hb_rate_t *video_framerate = hb_video_framerate_get_next(NULL);
          video_framerate != NULL;
@@ -79,6 +81,11 @@
 
 - (BOOL)fastDecodeSupported
 {
+    if (!(self.encoder & HB_VCODEC_X264_MASK))
+    {
+        return NO;
+    }
+
     const char * const *tunes = hb_video_encoder_get_tunes(self.encoder);
 
     for (int i = 0; tunes != NULL && tunes[i] != NULL; i++)
@@ -102,6 +109,17 @@
             (self.encoder & HB_VCODEC_X265_MASK));
 }
 
++ (NSSet<NSString *> *)keyPathsForValuesAffectingTwoPassSupported
+{
+    return [NSSet setWithObjects:@"encoder", nil];
+}
+
+- (BOOL)twoPassSupported
+{
+    return !((self.encoder & HB_VCODEC_FFMPEG_VT_H264) ||
+            (self.encoder & HB_VCODEC_FFMPEG_VT_H265));
+}
+
 + (NSSet<NSString *> *)keyPathsForValuesAffectingConstantQualityLabel
 {
     return [NSSet setWithObjects:@"encoder", nil];
@@ -109,20 +127,17 @@
 
 - (NSString *)constantQualityLabel
 {
-    if ((self.encoder & HB_VCODEC_X264_MASK) ||
-        (self.encoder & HB_VCODEC_X265_MASK))
-    {
-        return @"RF:";
-    }
-    else if (self.encoder == HB_VCODEC_FFMPEG_VP8 ||
-             self.encoder == HB_VCODEC_FFMPEG_VP9)
-    {
-        return @"CQ:";
-    }
-    else
-    {
-        return @"QP:";
-    }
+    return @(hb_video_quality_get_name(self.encoder));
+}
+
++ (NSSet<NSString *> *)keyPathsForValuesAffectingIsConstantQualitySupported
+{
+    return [NSSet setWithObjects:@"encoder", nil];
+}
+
+- (BOOL)isConstantQualitySupported
+{
+    return (self.qualityMaxValue == 0 && self.qualityMinValue == 0) == NO;
 }
 
 + (NSSet<NSString *> *)keyPathsForValuesAffectingUnparseOptions
@@ -193,14 +208,14 @@
     {
         tmpString = @"";
     }
-    
+
     return tmpString;
 }
 
 @end
 
 
-#pragma mark - Value Trasformers
+#pragma mark - Value Transformers
 
 @implementation HBVideoEncoderTransformer
 
@@ -265,7 +280,7 @@
     }
     else
     {
-        return NSLocalizedString(@"Same as source", @"HBVideo -> frame rates display name");
+        return HBKitLocalizedString(@"Same as source", @"HBVideo -> frame rates display name");
     }
 }
 
@@ -276,7 +291,7 @@
 
 - (id)reverseTransformedValue:(id)value
 {
-    if ([value isEqualTo:NSLocalizedString(@"Same as source", @"HBVideo -> frame rates display name")])
+    if ([value isEqualTo:HBKitLocalizedString(@"Same as source", @"HBVideo -> frame rates display name")])
     {
         return @0;
     }
@@ -414,6 +429,81 @@
 
 @end
 
+@implementation HBTuneTransformer
+
++ (Class)transformedValueClass
+{
+    return [NSString class];
+}
+
+- (id)transformedValue:(id)value
+{
+    if ([value isEqualToString:@"none"])
+    {
+        return HBKitLocalizedString(@"none", @"HBVideo -> tune");
+    }
+    else
+    {
+        return value;
+    }
+}
+
++ (BOOL)allowsReverseTransformation
+{
+    return YES;
+}
+
+- (id)reverseTransformedValue:(id)value
+{
+    if ([value isEqualTo:HBKitLocalizedString(@"none", @"HBVideo -> tune")])
+    {
+        return @"none";
+    }
+    else
+    {
+        return value;
+    }
+}
+
+@end
+
+@implementation HBTunesTransformer
+
++ (Class)transformedValueClass
+{
+    return [NSArray class];
+}
+
+- (id)transformedValue:(id)value
+{
+    if (value != nil)
+    {
+        NSMutableArray *localizedArray = [NSMutableArray array];
+
+        for (NSString *text in value)
+        {
+            if ([text isEqualToString:@"none"])
+            {
+                [localizedArray addObject:HBKitLocalizedString(@"none", @"HBVideo -> tune")];
+            }
+            else
+            {
+                [localizedArray addObject:text];
+            }
+        }
+        return localizedArray;
+    }
+
+    return value;
+}
+
++ (BOOL)allowsReverseTransformation
+{
+    return NO;
+}
+
+@end
+
 @implementation HBVideo (EncoderAdditions)
 
 - (BOOL)isUnparsedSupported:(int)encoder
@@ -428,11 +518,6 @@
 - (BOOL)isSimpleOptionsPanelSupported:(int)encoder
 {
     return (encoder & HB_VCODEC_FFMPEG_MASK) != 0;
-}
-
-- (BOOL)isOldAdvancedPanelSupported:(int)encoder
-{
-    return (encoder & HB_VCODEC_X264_MASK) != 0;
 }
 
 - (void)qualityLimitsForEncoder:(int)encoder low:(float *)low high:(float *)high granularity:(float *)granularity direction:(int *)direction

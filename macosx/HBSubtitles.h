@@ -6,30 +6,28 @@
 
 #import <Foundation/Foundation.h>
 #import "HBPresetCoding.h"
+#import "HBSecurityAccessToken.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 @class HBSubtitlesTrack;
+@class HBTitleSubtitlesTrack;
 @class HBSubtitlesDefaults;
 
-@interface HBSubtitles : NSObject <NSSecureCoding, NSCopying>
+@interface HBSubtitles : NSObject <NSSecureCoding, NSCopying, HBSecurityScope>
 
 - (void)addAllTracks;
 - (void)removeAll;
 - (void)reloadDefaults;
 
-- (void)addSrtTrackFromURL:(NSURL *)srtURL;
+- (void)addExternalTrackFromURL:(NSURL *)fileURL;
 
-@property (nonatomic, readonly) NSArray<NSDictionary *> *sourceTracks;
+@property (nonatomic, readonly) NSArray<HBTitleSubtitlesTrack *> *sourceTracks;
 @property (nonatomic, readonly) NSMutableArray<HBSubtitlesTrack *> *tracks;
 
 @property (nonatomic, readwrite, strong) HBSubtitlesDefaults *defaults;
 
 @property (nonatomic, readwrite, weak, nullable) NSUndoManager *undo;
-
-@end
-
-@interface HBSubtitles (KVC)
 
 @property (nonatomic, readonly) NSUInteger countOfTracks;
 - (HBSubtitlesTrack *)objectInTracksAtIndex:(NSUInteger)index;

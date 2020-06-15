@@ -1,14 +1,14 @@
 /* batch.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
- 
-#include "hb.h"
-#include "lang.h"
+
+#include "handbrake/handbrake.h"
+#include "handbrake/lang.h"
 
 struct hb_batch_s
 {
@@ -120,7 +120,7 @@ int hb_batch_title_count( hb_batch_t * d )
 /***********************************************************************
  * hb_batch_title_scan
  **********************************************************************/
-hb_title_t * hb_batch_title_scan( hb_batch_t * d, int t, uint64_t min_duration )
+hb_title_t * hb_batch_title_scan( hb_batch_t * d, int t )
 {
 
     hb_title_t   * title;
@@ -145,11 +145,6 @@ hb_title_t * hb_batch_title_scan( hb_batch_t * d, int t, uint64_t min_duration )
 
     title = hb_stream_title_scan( stream, title );
     hb_stream_close( &stream );
-    if( title != NULL && title->duration < min_duration )
-    {
-        hb_log( "batch: ignoring title (too short)" );
-        hb_title_close(&title);
-    }
 
     return title;
 }

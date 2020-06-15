@@ -11,13 +11,16 @@
              xmlns:splitButton="clr-namespace:HandBrakeWPF.Controls.SplitButton"
              xmlns:Properties="clr-namespace:HandBrakeWPF.Properties"
              xmlns:subtitles="clr-namespace:HandBrakeWPF.Converters.Subtitles"
+             xmlns:viewModels="clr-namespace:HandBrakeWPF.ViewModels"
              d:DesignHeight="350"
              d:DesignWidth="500"
              mc:Ignorable="d"
              x:Name="subTab">
     <UserControl.Resources>
         <Converters:BooleanToVisibilityConverter x:Key="booleanToVisConverter" />
+        <Converters:BooleanConverter x:Key="booleanConverter" />
         <subtitles:CanBurnSubtitleConverter x:Key="canBurnSubtitleConverter" />
+        <Converters:ThemeImageConverter x:Key="themeConverter" />
 
         <Style x:Key="LongToolTip" TargetType="TextBlock">
             <Setter Property="Width" Value="400" />
@@ -43,7 +46,7 @@
         <!-- Row 0 -->
         <TextBlock Grid.Row="0" Grid.Column="0"
                    Margin="10,5,0,0"
-                   FontWeight="Bold"
+                   FontSize="12" FontWeight="Bold"
                    VerticalAlignment="Top"
                    Text="{Binding PanelTitle}" />
 
@@ -54,8 +57,8 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -64,7 +67,7 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Margin="0,0,5,0" Padding="0"
                                    VerticalAlignment="Center"
-                                   Text="{x:Static Properties:ResourcesUI.Shared_AddTrack}" />
+                                   Text="{x:Static Properties:Resources.Shared_AddTrack}" />
 
                         <Path Height="5" Margin="2,2,0,0" VerticalAlignment="Center" HorizontalAlignment="Center"
                               Data="M 0 0 L 4 4 L 8 0 Z"
@@ -74,31 +77,30 @@
 
                 <Button.ContextMenu>
                     <ContextMenu x:Name="MainContextMenu" PlacementRectangle="{Binding RelativeSource={RelativeSource Self}}">
-                        <MenuItem Header="{x:Static Properties:ResourcesUI.Shared_AddNewTrack}" cal:Message.Attach="[Event Click] = [Action Add]" />
-                        <MenuItem Header="Add All Remaining Tracks" cal:Message.Attach="[Event Click] = [Action AddAllRemaining]" />
-                        <MenuItem Header="Add All Remaining Closed Captions" cal:Message.Attach="[Event Click] = [Action AddAllClosedCaptions]" />
-                        <MenuItem Header="Add All Remaining Selected Languages" cal:Message.Attach="[Event Click] = [Action AddAllRemainingForSelectedLanguages]" />
+                        <MenuItem Header="{x:Static Properties:Resources.Shared_AddNewTrack}" cal:Message.Attach="[Event Click] = [Action Add]" />
+                        <MenuItem Header="{x:Static Properties:Resources.Shared_AddAllRemaining}" cal:Message.Attach="[Event Click] = [Action AddAllRemaining]" />
+                        <MenuItem Header="{x:Static Properties:Resources.SubtitleView_AddRemainingCC}" cal:Message.Attach="[Event Click] = [Action AddAllClosedCaptions]" />
+                        <MenuItem Header="{x:Static Properties:Resources.Shared_AddAllForSelected}" cal:Message.Attach="[Event Click] = [Action AddAllRemainingForSelectedLanguages]" />
+                        <Separator/>
+                        <MenuItem Header="{x:Static Properties:Resources.SubtitlesView_ImportSubtitle}" cal:Message.Attach="[Event Click] = [Action Import]" />
                     </ContextMenu>
                 </Button.ContextMenu>
             </Button>
 
-            <Button MinWidth="75" Grid.Column="1"
-                    cal:Message.Attach="[Event Click] = [Action Import]"
-                    Content="{x:Static Properties:ResourcesUI.SubtitlesView_ImportSRT}"
-                    Margin="0,0,10,0"/>
-            <Button MinWidth="65" Grid.Column="2"
-                    Margin="0,0,10,0"
-                    cal:Message.Attach="[Event Click] = [Action Clear]"
-                    Content="{x:Static Properties:ResourcesUI.Generic_Clear}" />
 
-            <Button MinWidth="65" Grid.Column="4"
-                    Margin="0,0,10,0"
+            <Button MinWidth="65" Grid.Column="2"
+                    Margin="10,0,5,0"
                     cal:Message.Attach="[Event Click] = [Action ShowSubtitleDefaultsPanel]"
                     Content="{Binding SwitchDisplayTitle}" />
 
-            <Button MinWidth="65" Grid.Column="5"
+            <Button MinWidth="65" Grid.Column="3"
                     cal:Message.Attach="[Event Click] = [Action ReloadDefaults]"
-                    Content="{x:Static Properties:ResourcesUI.Shared_ReloadDefaults}" />
+                    Content="{x:Static Properties:Resources.Shared_ReloadDefaults}" />
+
+            <Button MinWidth="65" Grid.Column="5"
+                    Margin="0,0,0,0"
+                    cal:Message.Attach="[Event Click] = [Action Clear]"
+                    Content="{x:Static Properties:Resources.Generic_Clear}" />
         </Grid>
 
 
@@ -112,7 +114,7 @@
                  SelectionMode="Extended">
 
             <ListBox.ItemContainerStyle>
-                <Style TargetType="ListBoxItem">
+                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     <Setter Property="Margin" Value="0,0,0,1" />
                 </Style>
@@ -120,14 +122,14 @@
 
             <ListBox.ContextMenu>
                 <ContextMenu>
-                    <MenuItem Header="{x:Static Properties:ResourcesUI.Shared_AddNewTrack}" cal:Message.Attach="[Event Click] = [Action Add]" />
-                    <MenuItem Header="{x:Static Properties:ResourcesUI.Shared_AddAllRemaining}" cal:Message.Attach="[Event Click] = [Action AddAllRemaining]" />
-                    <MenuItem Header="{x:Static Properties:ResourcesUI.SubtitleView_AddAllCC}" cal:Message.Attach="[Event Click] = [Action AddAllClosedCaptions]" />
-                    <MenuItem Header="{x:Static Properties:ResourcesUI.Shared_AddAllForSelected}" cal:Message.Attach="[Event Click] = [Action AddAllRemainingForSelectedLanguages]" />    
+                    <MenuItem Header="{x:Static Properties:Resources.Shared_AddNewTrack}" cal:Message.Attach="[Event Click] = [Action Add]" />
+                    <MenuItem Header="{x:Static Properties:Resources.Shared_AddAllRemaining}" cal:Message.Attach="[Event Click] = [Action AddAllRemaining]" />
+                    <MenuItem Header="{x:Static Properties:Resources.SubtitleView_AddAllCC}" cal:Message.Attach="[Event Click] = [Action AddAllClosedCaptions]" />
+                    <MenuItem Header="{x:Static Properties:Resources.Shared_AddAllForSelected}" cal:Message.Attach="[Event Click] = [Action AddAllRemainingForSelectedLanguages]" />    
                     <Separator />
-                    <MenuItem Header="{x:Static Properties:ResourcesUI.Generic_Clear}" cal:Message.Attach="[Event Click] = [Action Clear]" />
+                    <MenuItem Header="{x:Static Properties:Resources.Generic_Clear}" cal:Message.Attach="[Event Click] = [Action Clear]" />
                     <Separator />
-                    <MenuItem Header="{x:Static Properties:ResourcesUI.Shared_ConfigureDefaultBehaviours}" cal:Message.Attach="[Event Click] = [Action ShowSubtitleDefaultsPanel]" />
+                    <MenuItem Header="{x:Static Properties:Resources.Shared_ConfigureDefaultBehaviours}" cal:Message.Attach="[Event Click] = [Action ShowSubtitleDefaultsPanel]" />
                 </ContextMenu>
             </ListBox.ContextMenu>
 
@@ -141,17 +143,11 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <!--  Marker  -->
-                        <Image Grid.Column="0"
-                               Width="20"
-                               Height="20"
-                               Margin="5,0,5,0"
-                               Source="Images/Movies_small.png" />
-
                         <!--  Standard Subtitle Settings  -->
                         <Grid Grid.Column="1" HorizontalAlignment="Stretch" Margin="0,8,0,8"
                               Visibility="{Binding IsSrtSubtitle, Converter={StaticResource booleanToVisConverter}, ConverterParameter=true}">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
@@ -166,14 +162,16 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
+                            <Image Width="16" Source="{Binding Converter={StaticResource themeConverter}, ConverterParameter='Reorder.png'}" />
+
                             <ComboBox Grid.Column="1" Height="22" Width="235" Margin="5,0,5,0" HorizontalAlignment="Stretch"
                                       ItemsSource="{Binding DataContext.SourceTracks, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type UserControl}}}"
                                       SelectedItem="{Binding SourceTrack}" />
 
                             <CheckBox Grid.Column="3" Margin="5,0,5,0" VerticalAlignment="Center" IsEnabled="{Binding CanBeForced}" IsChecked="{Binding Forced}" 
-                                      Content="Forced Only" FontWeight="Bold" />
-                            
-                            <CheckBox Grid.Column="4" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Burned}" x:Name="burnInCheckbox" Content="Burn In" FontWeight="Bold">
+                                      Content="{x:Static Properties:Resources.SubtitlesView_ForcedOnly}" FontWeight="Bold" />
+
+                            <CheckBox Grid.Column="4" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Burned}" x:Name="burnInCheckbox" Content="{x:Static Properties:Resources.SubtitlesView_BurnIn}" FontWeight="Bold">
                                 <CheckBox.IsEnabled>
                                     <MultiBinding Converter="{StaticResource canBurnSubtitleConverter}">
                                         <Binding Path="CanBeBurned" />
@@ -189,8 +187,9 @@
                                     </i:EventTrigger>
                                 </i:Interaction.Triggers>
                             </CheckBox>
-                            
-                            <CheckBox Grid.Column="5" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Default}" Content="Default" FontWeight="Bold">
+
+                            <CheckBox Grid.Column="5" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Default}" Content="{x:Static Properties:Resources.SubtitlesView_Default}" FontWeight="Bold"
+                                      IsEnabled="{Binding DataContext.IsBurnableOnly, Converter={StaticResource booleanConverter}, ConverterParameter=true, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type UserControl}}}">
                                 <i:Interaction.Triggers>
                                     <i:EventTrigger EventName="Click">
                                         <cal:ActionMessage MethodName="SelectDefaultTrack">
@@ -198,13 +197,19 @@
                                         </cal:ActionMessage>
                                     </i:EventTrigger>
                                 </i:Interaction.Triggers>
-                            </CheckBox>        
+                            </CheckBox>
+
+                            <StackPanel Orientation="Horizontal" Grid.Column="6" Margin="5,0,0,0">
+                                <TextBlock Text="Name: " FontWeight="Bold" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                <TextBox x:Name="TrackName" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Grid.Column="10" Width="120" />
+                            </StackPanel>
                         </Grid>
 
                         <!--  SRT Subtitle Settings  -->
                         <Grid Grid.Column="1" HorizontalAlignment="Stretch" Margin="0,8,0,8"
                               Visibility="{Binding IsSrtSubtitle, Converter={StaticResource booleanToVisConverter}, ConverterParameter=false}" >
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
@@ -223,7 +228,7 @@
                             </Grid.RowDefinitions>
 
                             <!--  Row 1  -->
-                            <TextBlock Grid.Column="0" VerticalAlignment="Center" FontWeight="Bold" Text="Source" />
+                            <TextBlock Grid.Column="0" VerticalAlignment="Center" FontWeight="Bold" Text="Source" Margin="10,0,0,0" />
                             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding SrtFileName}" Margin="5,0,5,0" Width="75" TextWrapping="NoWrap" TextTrimming="WordEllipsis"
                                        Visibility="{Binding IsSrtSubtitle, Converter={StaticResource booleanToVisConverter}, ConverterParameter=false}" />
 
@@ -240,8 +245,9 @@
                             <TextBlock Grid.Column="6" VerticalAlignment="Center" FontWeight="Bold" Text="Offset (ms)" />
                             <controls:NumberBox Grid.Column="7" Width="58" Height="24" Margin="5,0,5,0" Minimum="-9000000" Maximum="900000" 
                                                 IsEnabled="{Binding IsSrtSubtitle}" Number="{Binding SrtOffset, Mode=TwoWay}" />
-             
-                            <CheckBox Grid.Column="8" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Burned}" IsEnabled="{Binding CanBeBurned}" Content="Burn In" FontWeight="Bold">
+
+                            <CheckBox Grid.Column="8" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Burned}" IsEnabled="{Binding CanBeBurned}" Content="Burn In" FontWeight="Bold" 
+                                      VerticalContentAlignment="Center">
                                 <i:Interaction.Triggers>
                                     <i:EventTrigger EventName="Click">
                                         <cal:ActionMessage MethodName="SetBurnedToFalseForAllExcept">
@@ -251,7 +257,8 @@
                                 </i:Interaction.Triggers>
                             </CheckBox>
 
-                            <CheckBox Grid.Column="9" Margin="5,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Default}" Content="Default" FontWeight="Bold">
+                            <CheckBox Grid.Column="9" Margin="0,0,5,0" VerticalAlignment="Center" IsChecked="{Binding Default}" Content="Default" FontWeight="Bold" VerticalContentAlignment="Center"
+                                      IsEnabled="{Binding DataContext.IsBurnableOnly, Converter={StaticResource booleanConverter}, ConverterParameter=true, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type UserControl}}}">
                                 <i:Interaction.Triggers>
                                     <i:EventTrigger EventName="Click">
                                         <cal:ActionMessage MethodName="SelectDefaultTrack">
@@ -261,6 +268,11 @@
                                 </i:Interaction.Triggers>
                             </CheckBox>
 
+                            <StackPanel Orientation="Horizontal" Grid.Column="10" Margin="5,0,0,0">
+                                <TextBlock Text="Name: " FontWeight="Bold" Margin="0,0,5,0" />
+                                <TextBox x:Name="TrackNameSrt" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Grid.Column="10" Width="120" />
+                            </StackPanel>
+
                         </Grid>
 
                         <!--  Delete  -->
@@ -268,7 +280,7 @@
                                Width="16"
                                Height="16"
                                Margin="5,0,10,0"
-                               Source="Images/delete.png">
+                               Source="Images/close64.png">
                             <i:Interaction.Triggers>
                                 <i:EventTrigger EventName="MouseDown">
                                     <cal:ActionMessage MethodName="Remove">

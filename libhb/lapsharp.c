@@ -1,13 +1,13 @@
 /* lapsharp.c
 
-   Copyright (c) 2003-2018 HandBrake Team
+   Copyright (c) 2003-2020 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
    For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
  */
 
-#include "hb.h"
+#include "handbrake/handbrake.h"
 
 #define LAPSHARP_STRENGTH_LUMA_DEFAULT   0.2
 #define LAPSHARP_STRENGTH_CHROMA_DEFAULT 0.2
@@ -85,6 +85,9 @@ static kernel_t kernels[] =
 struct hb_filter_private_s
 {
     lapsharp_plane_context_t plane_ctx[3];
+
+    hb_filter_init_t         input;
+    hb_filter_init_t         output;
 };
 
 static int hb_lapsharp_init(hb_filter_object_t *filter,
@@ -162,6 +165,8 @@ static int hb_lapsharp_init(hb_filter_object_t *filter,
     hb_filter_private_t * pv = filter->private_data;
 
     char *kernel_string[3];
+
+    pv->input = *init;
 
     // Mark parameters unset
     for (int c = 0; c < 3; c++)
@@ -252,6 +257,7 @@ static int hb_lapsharp_init(hb_filter_object_t *filter,
             ctx->kernel = c ? LAPSHARP_KERNEL_CHROMA_DEFAULT : LAPSHARP_KERNEL_LUMA_DEFAULT;
         }
     }
+    pv->output = *init;
 
     return 0;
 }
@@ -283,7 +289,12 @@ static int hb_lapsharp_work(hb_filter_object_t *filter,
         return HB_FILTER_DONE;
     }
 
-    out = hb_frame_buffer_init(in->f.fmt, in->f.width, in->f.height);
+    hb_frame_buffer_mirror_stride(in);
+    out = hb_frame_buffer_init(pv->output.pix_fmt, in->f.width, in->f.height);
+    out->f.color_prim     = pv->output.color_prim;
+    out->f.color_transfer = pv->output.color_transfer;
+    out->f.color_matrix   = pv->output.color_matrix;
+    out->f.color_range    = pv->output.color_range ;
 
     int c;
     for (c = 0; c < 3; c++)

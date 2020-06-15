@@ -9,9 +9,15 @@
 
 namespace HandBrakeWPF.Instance
 {
+    using System;
+
     using HandBrake.Interop.Interop;
     using HandBrake.Interop.Interop.Interfaces;
     using HandBrake.Interop.Model;
+
+    using HandBrakeWPF.Services.Interfaces;
+    using HandBrakeWPF.Services.Logging.Interfaces;
+    using HandBrakeWPF.Utilities;
 
     /// <summary>
     /// The HandBrake Instance manager.
@@ -20,20 +26,74 @@ namespace HandBrakeWPF.Instance
     public static class HandBrakeInstanceManager
     {
         private static IEncodeInstance encodeInstance;
+        private static HandBrakeInstance scanInstance;
+        private static HandBrakeInstance previewInstance;
+        private static bool noHardware;
 
-        /// <summary>
-        /// Initializes static members of the <see cref="HandBrakeInstanceManager"/> class.
-        /// </summary>
-        static HandBrakeInstanceManager()
+        public static void Init(bool noHardwareMode)
         {
+            noHardware = noHardwareMode;
+            HandBrakeUtils.RegisterLogger();
+            HandBrakeUtils.EnsureGlobalInit(noHardwareMode);
+        }
+
+        public static IEncodeInstance GetEncodeInstance(int verbosity, HBConfiguration configuration, ILog logService, IUserSettingService userSettingService, IPortService portService)
+        {
+            if (!HandBrakeUtils.IsInitialised())
+            {
+                throw new Exception("Please call Init before Using!");
+            }
+
+            IEncodeInstance newInstance;
+
+            if (userSettingService.GetUserSetting<bool>(UserSettingConstants.ProcessIsolationEnabled) && Portable.IsProcessIsolationEnabled())
+            {
+                newInstance = new RemoteInstance(logService, userSettingService, portService);
+            }
+            else
+            {
+                if (encodeInstance != null && !encodeInstance.IsRemoteInstance)
+                {
+                    encodeInstance.Dispose();
+                    encodeInstance = null;
+                }
+
+                newInstance = new HandBrakeInstance();
+                HandBrakeUtils.SetDvdNav(!userSettingService.GetUserSetting<bool>(UserSettingConstants.DisableLibDvdNav));
+                encodeInstance = newInstance;
+            }
+
+            newInstance.Initialize(verbosity, noHardware);
+            return newInstance;
         }
 
         /// <summary>
-        /// The init.
+        /// Gets the scanInstance.
         /// </summary>
-        public static void Init()
+        /// <param name="verbosity">
+        /// The verbosity.
+        /// </param>
+        /// <returns>
+        /// The <see cref="IHandBrakeInstance"/>.
+        /// </returns>
+        public static IHandBrakeInstance GetScanInstance(int verbosity)
         {
-            // Nothing to do. Triggers static constructor.
+            if (!HandBrakeUtils.IsInitialised())
+            {
+                throw new Exception("Please call Init before Using!");
+            }
+
+            if (scanInstance != null)
+            {
+                scanInstance.Dispose();
+                scanInstance = null;
+            }
+
+            HandBrakeInstance newInstance = new HandBrakeInstance();
+            newInstance.Initialize(verbosity, noHardware);
+            scanInstance = newInstance;
+
+            return scanInstance;
         }
 
         /// <summary>
@@ -42,37 +102,32 @@ namespace HandBrakeWPF.Instance
         /// <param name="verbosity">
         /// The verbosity.
         /// </param>
-        /// <param name="configuration">
-        /// The configuratio.
+        /// <param name="userSettingService">
+        /// The user Setting Service.
         /// </param>
         /// <returns>
         /// The <see cref="IHandBrakeInstance"/>.
         /// </returns>
-        public static IEncodeInstance GetEncodeInstance(int verbosity, HBConfiguration configuration)
+        public static IHandBrakeInstance GetPreviewInstance(int verbosity, IUserSettingService userSettingService)
         {
-            if (encodeInstance != null)
+            if (!HandBrakeUtils.IsInitialised())
             {
-                encodeInstance.Dispose();
-                encodeInstance = null;
+                throw new Exception("Please call Init before Using!");
             }
 
-            IEncodeInstance newInstance;
-
-            if (configuration.RemoteServiceEnabled)
+            if (previewInstance != null)
             {
-                newInstance = new RemoteInstance(configuration.RemoteServicePort);
+                previewInstance.Dispose();
+                previewInstance = null;
             }
-            else
-            {
-                newInstance = new HandBrakeInstance();
-            }
-                
-            newInstance.Initialize(verbosity);
-            encodeInstance = newInstance;
 
-            HandBrakeUtils.SetDvdNav(!configuration.IsDvdNavDisabled);
+            HandBrakeInstance newInstance = new HandBrakeInstance();
+            newInstance.Initialize(verbosity, noHardware);
+            previewInstance = newInstance;
 
-            return encodeInstance;
+            HandBrakeUtils.SetDvdNav(!userSettingService.GetUserSetting<bool>(UserSettingConstants.DisableLibDvdNav));
+
+            return previewInstance;
         }
     }
 }

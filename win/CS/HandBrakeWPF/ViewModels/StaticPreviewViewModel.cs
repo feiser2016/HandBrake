@@ -14,21 +14,23 @@ namespace HandBrakeWPF.ViewModels
     using System.Diagnostics;
     using System.Globalization;
     using System.IO;
-    using System.Linq;
     using System.Runtime.ExceptionServices;
     using System.Threading;
     using System.Windows;
     using System.Windows.Media.Imaging;
 
     using HandBrake.Interop.Interop.Model.Encoding;
+    using HandBrake.Interop.Interop.Providers.Interfaces;
 
     using HandBrakeWPF.Factories;
     using HandBrakeWPF.Properties;
     using HandBrakeWPF.Services.Encode.Model.Models;
     using HandBrakeWPF.Services.Interfaces;
+    using HandBrakeWPF.Services.Logging.Interfaces;
     using HandBrakeWPF.Services.Queue.Model;
     using HandBrakeWPF.Services.Scan.Interfaces;
     using HandBrakeWPF.Services.Scan.Model;
+    using HandBrakeWPF.Utilities;
     using HandBrakeWPF.ViewModels.Interfaces;
 
     using EncodeCompletedEventArgs = HandBrakeWPF.Services.Encode.EventArgs.EncodeCompletedEventArgs;
@@ -39,100 +41,24 @@ namespace HandBrakeWPF.ViewModels
     using OutputFormat = HandBrakeWPF.Services.Encode.Model.Models.OutputFormat;
     using PointToPointMode = HandBrakeWPF.Services.Encode.Model.Models.PointToPointMode;
 
-    /// <summary>
-    ///     The Static Preview View Model
-    /// </summary>
     public class StaticPreviewViewModel : ViewModelBase, IStaticPreviewViewModel
     {
-        /*
-         * TODO
-         * - Window Size / Scale to screen etc.
-         */
-
-        #region Fields
-
-        /// <summary>
-        ///     The scan service.
-        /// </summary>
         private readonly IScan scanService;
-
-        /// <summary>
-        /// Backing field for the encode service.
-        /// </summary>
         private readonly IEncode encodeService;
-
-        /// <summary>
-        /// The error service
-        /// </summary>
         private readonly IErrorService errorService;
-
-        /// <summary>
-        /// The user Setting Service
-        /// </summary>
         private readonly IUserSettingService userSettingService;
-
-        /// <summary>
-        ///     The height.
-        /// </summary>
         private int height;
-
-        /// <summary>
-        ///     The preview image.
-        /// </summary>
-        private BitmapImage previewImage;
-
-        /// <summary>
-        ///     The selected preview image.
-        /// </summary>
+        private BitmapSource previewImage;
         private int selectedPreviewImage;
-
-        /// <summary>
-        ///     The width.
-        /// </summary>
         private int width;
-
-        /// <summary>
-        /// The preview not available.
-        /// </summary>
         private bool previewNotAvailable;
-
-        /// <summary>
-        /// The percentage.
-        /// </summary>
         private string percentage;
-
-        /// <summary>
-        /// The percentage value.
-        /// </summary>
         private double percentageValue;
-
-        /// <summary>
-        /// The Backing field for IsEncoding
-        /// </summary>
         private bool isEncoding;
-
-        /// <summary>
-        /// Backing field for use system default player
-        /// </summary>
         private bool useSystemDefaultPlayer;
+        private bool previewRotateFlip;
 
-        #endregion
-
-        #region Constructors and Destructors
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="StaticPreviewViewModel"/> class.
-        /// </summary>
-        /// <param name="scanService">
-        /// The scan service.
-        /// </param>
-        /// <param name="userSettingService">
-        /// The user Setting Service.
-        /// </param>
-        /// <param name="errorService">
-        /// The error Service.
-        /// </param>
-        public StaticPreviewViewModel(IScan scanService, IUserSettingService userSettingService, IErrorService errorService)
+        public StaticPreviewViewModel(IScan scanService, IUserSettingService userSettingService, IErrorService errorService, IHbFunctionsProvider hbFunctionsProvider, ILog logService, ILogInstanceManager logInstanceManager, IPortService portService)
         {
             this.scanService = scanService;
             this.selectedPreviewImage = 1;
@@ -142,7 +68,7 @@ namespace HandBrakeWPF.ViewModels
             // Live Preview
             this.userSettingService = userSettingService;
             this.errorService = errorService;
-            this.encodeService = new LibEncode(); // Preview needs a separate instance rather than the shared singleton. This could maybe do with being refactored at some point
+            this.encodeService = new LibEncode(hbFunctionsProvider, userSettingService, logInstanceManager, 0, portService); // Preview needs a separate instance rather than the shared singleton. This could maybe do with being refactored at some point
 
             this.Title = "Preview";
             this.Percentage = "0.00%";
@@ -151,13 +77,11 @@ namespace HandBrakeWPF.ViewModels
             this.CanPlay = true;
 
             this.useSystemDefaultPlayer = userSettingService.GetUserSetting<bool>(UserSettingConstants.DefaultPlayer);
-            this.Duration = userSettingService.GetUserSetting<int>(UserSettingConstants.LastPreviewDuration, typeof(int));
+            this.Duration = userSettingService.GetUserSetting<int>(UserSettingConstants.LastPreviewDuration);
+            this.previewRotateFlip = userSettingService.GetUserSetting<bool>(UserSettingConstants.PreviewRotationFlip);
+            this.NotifyOfPropertyChange(() => this.previewRotateFlip); // Don't want to trigger an Update, so setting the backing variable. 
         }
-
-        #endregion
-
-        #region Public Properties
-
+        
         /// <summary>
         ///     Gets or sets the height.
         /// </summary>
@@ -181,7 +105,7 @@ namespace HandBrakeWPF.ViewModels
         /// <summary>
         ///     Gets or sets the preview image.
         /// </summary>
-        public BitmapImage PreviewImage
+        public BitmapSource PreviewImage
         {
             get
             {
@@ -221,6 +145,24 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
+        public bool PreviewRotateFlip
+        {
+            get => this.previewRotateFlip;
+            set
+            {
+                if (value == this.previewRotateFlip)
+                {
+                    return;
+                }
+
+                this.previewRotateFlip = value;
+                this.NotifyOfPropertyChange(() => this.PreviewRotateFlip);
+
+                this.UpdatePreviewFrame();
+                this.userSettingService.SetUserSetting(UserSettingConstants.PreviewRotationFlip, value);
+            }
+        }
+
         /// <summary>
         ///     Gets or sets the task.
         /// </summary>
@@ -238,7 +180,7 @@ namespace HandBrakeWPF.ViewModels
         {
             get
             {
-                return this.userSettingService.GetUserSetting<int>(UserSettingConstants.PreviewScanCount, typeof(int)) - 1;
+                return this.userSettingService.GetUserSetting<int>(UserSettingConstants.PreviewScanCount) - 1;
             }
         }
 
@@ -281,10 +223,6 @@ namespace HandBrakeWPF.ViewModels
                 this.NotifyOfPropertyChange(() => this.PreviewNotAvailable);
             }
         }
-
-        #endregion
-
-        #region LivePreviewProperties
 
         /// <summary>
         /// Gets AvailableDurations.
@@ -345,7 +283,7 @@ namespace HandBrakeWPF.ViewModels
             {
                 List<int> startPoints = new List<int>();
                 for (int i = 1;
-                     i <= this.userSettingService.GetUserSetting<int>(UserSettingConstants.PreviewScanCount, typeof(int));
+                     i <= this.userSettingService.GetUserSetting<int>(UserSettingConstants.PreviewScanCount);
                      i++)
                 {
                     startPoints.Add(i);
@@ -399,9 +337,8 @@ namespace HandBrakeWPF.ViewModels
         /// Gets or sets a value indicating whether can play.
         /// </summary>
         public bool CanPlay { get; set; }
-        #endregion
 
-        #region Public Methods and Operators
+        public bool IsOpen { get; set; }
 
         /// <summary>
         /// The update preview frame.
@@ -421,14 +358,9 @@ namespace HandBrakeWPF.ViewModels
             this.ScannedSource = scannedSource;
         }
 
-        /// <summary>
-        /// Gets or sets a value indicating whether is open.
-        /// </summary>
-        public bool IsOpen { get; set; }
-
         public void NextPreview()
         {
-            int maxPreview = this.userSettingService.GetUserSetting<int>(UserSettingConstants.PreviewScanCount, typeof(int));
+            int maxPreview = this.userSettingService.GetUserSetting<int>(UserSettingConstants.PreviewScanCount);
             if ((this.SelectedPreviewImage + 1) == maxPreview)
             {
                 return;
@@ -466,10 +398,10 @@ namespace HandBrakeWPF.ViewModels
                 return;
             }
 
-            BitmapImage image = null;
+            BitmapSource image = null;
             try
             {
-                image = this.scanService.GetPreview(this.Task, this.SelectedPreviewImage, HBConfigurationFactory.Create());
+                image = this.scanService.GetPreview(this.Task, this.SelectedPreviewImage);
             }
             catch (Exception exc)
             {
@@ -479,6 +411,11 @@ namespace HandBrakeWPF.ViewModels
 
             if (image != null)
             {
+                if (previewRotateFlip)
+                {
+                    image = BitmapHelpers.CreateTransformedBitmap(image, this.Task.Rotation, this.Task.FlipVideo);
+                }
+
                 PreviewNotAvailable = false;
                 this.Width = (int)Math.Ceiling(image.Width);
                 this.Height = (int)Math.Ceiling(image.Height);
@@ -486,12 +423,6 @@ namespace HandBrakeWPF.ViewModels
             }
         }
 
-        /// <summary>
-        /// The preview size changed.
-        /// </summary>
-        /// <param name="ea">
-        /// The ea.
-        /// </param>
         public int FixWidth(int width)
         {
             Rect workArea = SystemParameters.WorkArea;
@@ -514,18 +445,12 @@ namespace HandBrakeWPF.ViewModels
             return height;
         }
 
-        #endregion
-
-        #region Public Method - Live Preview 
-
-        #region Public Methods
-
         /// <summary>
         /// Close this window.
         /// </summary>
         public void Close()
         {
-            this.TryClose();
+            this.IsOpen = false;
         }
 
         /// <summary>
@@ -544,19 +469,19 @@ namespace HandBrakeWPF.ViewModels
             {
                 this.IsEncoding = true;
                 if (File.Exists(this.CurrentlyPlaying))
+                {
                     File.Delete(this.CurrentlyPlaying);
+                }
             }
             catch (Exception)
             {
                 this.IsEncoding = false;
-                this.errorService.ShowMessageBox(Resources.StaticPreview_UnableToDeletePreview, 
-                               Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
+                this.errorService.ShowMessageBox(Resources.StaticPreview_UnableToDeletePreview, Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             if (this.Task == null || string.IsNullOrEmpty(Task.Source))
             {
-                this.errorService.ShowMessageBox(Resources.StaticPreviewViewModel_ScanFirst, 
-                               Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
+                this.errorService.ShowMessageBox(Resources.StaticPreviewViewModel_ScanFirst, Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -570,7 +495,22 @@ namespace HandBrakeWPF.ViewModels
             // Filename handling.
             if (string.IsNullOrEmpty(encodeTask.Destination))
             {
-                string filename = Path.ChangeExtension(Path.GetTempFileName(), encodeTask.OutputFormat == OutputFormat.Mkv ? "m4v" : "mkv");
+                string formatExtension;
+                switch (encodeTask.OutputFormat)
+                {
+                    case OutputFormat.WebM:
+                        formatExtension = "webm";
+                        break;
+                    case OutputFormat.Mp4:
+                        formatExtension = "m4v";
+                        break;
+                    case OutputFormat.Mkv:
+                    default:
+                        formatExtension = "mkv";
+                        break;
+                }
+
+                string filename = Path.ChangeExtension(Path.GetTempFileName(), formatExtension);
                 encodeTask.Destination = filename;
                 this.CurrentlyPlaying = filename;
             }
@@ -605,13 +545,18 @@ namespace HandBrakeWPF.ViewModels
                 encodeTask.SubtitleTracks.Remove(scanTrack);
             }
 
-            QueueTask task = new QueueTask(encodeTask, HBConfigurationFactory.Create(), this.ScannedSource.ScanPath, null);
+            QueueTask task = new QueueTask(encodeTask, HBConfigurationFactory.Create(), this.ScannedSource.ScanPath, null, false);
             ThreadPool.QueueUserWorkItem(this.CreatePreview, task);
         }
 
-        #endregion
+        public void CancelEncode()
+        {
+            if (this.encodeService.IsEncoding)
+            {
+                this.encodeService.Stop();
+            }
+        }
 
-        #region Private Methods
 
         /// <summary>
         /// Play the Encoded file
@@ -691,13 +636,9 @@ namespace HandBrakeWPF.ViewModels
             this.encodeService.EncodeCompleted += this.encodeService_EncodeCompleted;
             this.encodeService.EncodeStatusChanged += this.encodeService_EncodeStatusChanged;
 
-            this.encodeService.Start(((QueueTask)state).Task, ((QueueTask)state).Configuration);
+            this.encodeService.Start(((QueueTask)state).Task, ((QueueTask)state).Configuration, null);
             this.userSettingService.SetUserSetting(UserSettingConstants.LastPreviewDuration, this.Duration);
         }
-
-        #endregion
-
-        #region Event Handlers
 
         /// <summary>
         /// Handle Encode Progress Events
@@ -732,9 +673,10 @@ namespace HandBrakeWPF.ViewModels
             this.encodeService.EncodeCompleted -= this.encodeService_EncodeCompleted;
             this.encodeService.EncodeStatusChanged -= this.encodeService_EncodeStatusChanged;
 
-            this.PlayFile();
+            if (e.ErrorInformation != "1")
+            {
+                this.PlayFile();
+            }
         }
-        #endregion
-        #endregion
     }
 }

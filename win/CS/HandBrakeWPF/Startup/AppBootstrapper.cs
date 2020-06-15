@@ -14,8 +14,13 @@ namespace HandBrakeWPF.Startup
 
     using Caliburn.Micro;
 
+    using HandBrake.Interop.Interop.Providers;
+    using HandBrake.Interop.Interop.Providers.Interfaces;
+
     using HandBrakeWPF.Services;
     using HandBrakeWPF.Services.Interfaces;
+    using HandBrakeWPF.Services.Logging;
+    using HandBrakeWPF.Services.Logging.Interfaces;
     using HandBrakeWPF.Services.Presets;
     using HandBrakeWPF.Services.Presets.Interfaces;
     using HandBrakeWPF.Services.Queue;
@@ -60,7 +65,8 @@ namespace HandBrakeWPF.Startup
             this.container.Singleton<IPrePostActionService, PrePostActionService>();
             this.container.Singleton<IUserSettingService, UserSettingService>();
             this.container.Singleton<IPresetService, PresetService>();
-            this.container.Singleton<IQueueProcessor, QueueProcessor>();
+            this.container.Singleton<IQueueService, QueueService>();
+            this.container.Singleton<HandBrakeWPF.Services.Logging.Interfaces.ILog, LogService>();
 
             // Commands
 
@@ -77,12 +83,14 @@ namespace HandBrakeWPF.Startup
             this.container.Singleton<ITitleSpecificViewModel, TitleSpecificViewModel>();
             this.container.Singleton<IQueueSelectionViewModel, QueueSelectionViewModel>();
             this.container.Singleton<ICountdownAlertViewModel, CountdownAlertViewModel>();
-            this.container.Singleton<IMiniViewModel, MiniViewModel>();
             this.container.Singleton<IStaticPreviewViewModel, StaticPreviewViewModel>();
-
+            this.container.Singleton<ISystemService, SystemService>();
+            this.container.Singleton<IHbFunctionsProvider, HbFunctionsProvider>();
+            this.container.Singleton<ILogInstanceManager, LogInstanceManager>();
+            this.container.Singleton<IPortService, PortService>();
+            
             // Tab Components
             this.container.Singleton<IAudioViewModel, AudioViewModel>();
-            this.container.Singleton<IX264ViewModel, X264ViewModel>();
             this.container.Singleton<IPictureSettingsViewModel, PictureSettingsViewModel>();
             this.container.Singleton<IChaptersViewModel, ChaptersViewModel>();
             this.container.Singleton<ISubtitlesViewModel, SubtitlesViewModel>();
